@@ -46,9 +46,11 @@ node tests/acceptance_test.mjs       # 受け入れテスト
 ## エンジニア向けパッケージ（別売）
 
 Claude Code 用の問診スキル・予約解禁の自動監視（楽天トラベルAPI＋GitHub Actions）・
-設計ドキュメント一式・踏んだ地雷の記録は、note で頒布しています。
+設計ドキュメント一式・踏んだ地雷の記録は、note / Brain で頒布しています（内容は同一です）。
 
-👉 [7歳・120cm。あと2cmで乗れなかった。──子連れテーマパークの「詰み」を出発前に潰す制約ソルバーの作り方](https://note.com/clab_jp/n/n64aa8bc0ddf3)
+👉 note版: [7歳・120cm。あと2cmで乗れなかった。──子連れテーマパークの「詰み」を出発前に潰す制約ソルバーの作り方](https://note.com/clab_jp/n/n64aa8bc0ddf3)
+
+👉 Brain版: [7歳・120cm。あと2cmで乗れなかった。──子連れテーマパークの「詰み」を出発前に潰す制約ソルバーの作り方](https://brain-market.com/u/sukoshi_nantoka/a/b3ETM4UjMgoTZsNWa0JXY)
 
 ## ライセンス / 免責
 
