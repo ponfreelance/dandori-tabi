@@ -1,0 +1,19 @@
+{
+  "_comment": "公式『身長制限』ページで検証済み（verifiedAt/source参照）。minHeight=単独利用の下限cm / minHeightWithAdult=付き添い者同伴時の下限cm（null=同伴なら身長制限なし）/ maxHeight=上限cm。schemaVersion 2: 旧minHeightは実質『同伴時の値』だったため意味を再定義（単独値）した破壊的変更",
+  "schemaVersion": 2,
+  "park": "USJ",
+  "verifiedAt": "2026-07-23",
+  "source": "https://www.usj.co.jp/web/ja/jp/attractions/requirements/height-restriction",
+  "attractions": [
+    {"id":"kart","name":"マリオカート ～クッパの挑戦状～","short":"マリオカート","area":"マリオ","minHeight":122,"minHeightWithAdult":107,"maxHeight":null},
+    {"id":"yoshi","name":"ヨッシー・アドベンチャー","short":"ヨッシー","area":"マリオ","minHeight":122,"minHeightWithAdult":92,"maxHeight":null},
+    {"id":"donk","name":"ドンキーコングのクレイジー・トロッコ","short":"トロッコ","area":"マリオ","minHeight":122,"minHeightWithAdult":107,"maxHeight":null},
+    {"id":"fj","name":"ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー","short":"フォービドゥン","area":"ハリポタ","minHeight":122,"minHeightWithAdult":122,"maxHeight":null},
+    {"id":"hippo","name":"フライト・オブ・ザ・ヒッポグリフ","short":"ヒッポグリフ","area":"ハリポタ","minHeight":122,"minHeightWithAdult":92,"maxHeight":195},
+    {"id":"jp","name":"ジュラシック・パーク・ザ・ライド","short":"ジュラシック","area":"ジュラシック","minHeight":122,"minHeightWithAdult":107,"maxHeight":null},
+    {"id":"mini","name":"ミニオン・ハチャメチャ・ライド","short":"ミニオン","area":"ミニオン","minHeight":122,"minHeightWithAdult":102,"maxHeight":null},
+    {"id":"jaws","name":"ジョーズ","short":"ジョーズ","area":"アミティ","minHeight":122,"minHeightWithAdult":null,"maxHeight":null,"notes":"一人で座って安定した姿勢を保てること（膝上不可）"},
+    {"id":"hd","name":"ハリウッド・ドリーム・ザ・ライド","short":"ハリドリ","area":"ハリウッド","minHeight":132,"minHeightWithAdult":132,"maxHeight":null},
+    {"id":"fd","name":"ザ・フライング・ダイナソー","short":"ダイナソー","area":"ジュラシック","minHeight":132,"minHeightWithAdult":132,"maxHeight":198}
+  ]
+}
