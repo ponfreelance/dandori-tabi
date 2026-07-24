@@ -1,2 +1,5 @@
 __pycache__/
 *.png
+
+# Brain eyecatch assets are intentional deliverables
+!docs/assets/*.png
