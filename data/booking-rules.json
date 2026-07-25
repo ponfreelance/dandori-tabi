@@ -1,0 +1,150 @@
+{
+ "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）",
+ "schemaVersion": 3,
+ "rules": [
+  {
+   "id": "jal",
+   "label": "飛行機（JAL国内線）",
+   "anchor": "flight",
+   "carrier": "JAL",
+   "offsetMonths": 0,
+   "offsetDays": -360,
+   "at": "00:00",
+   "mode": "exact",
+   "criticality": "singlePoint",
+   "note": "搭乗日の360日前 0:00から",
+   "cancel": {
+    "refundable": "partial",
+    "note": "運賃種別で大きく変わる。割引運賃ほど取消手数料が重い。購入前に運賃規則を確認"
+   }
+  },
+  {
+   "id": "ana",
+   "label": "飛行機（ANA国内線）",
+   "anchor": "flight",
+   "carrier": "ANA",
+   "offsetMonths": 0,
+   "offsetDays": -355,
+   "at": "09:00",
+   "mode": "exact",
+   "criticality": "singlePoint",
+   "note": "355日前。2026/5/19搭乗分以降は9:00（それ以前は9:30）",
+   "cancel": {
+    "refundable": "partial",
+    "note": "運賃種別で大きく変わる。割引運賃ほど取消手数料が重い。購入前に運賃規則を確認"
+   }
+  },
+  {
+   "id": "jr",
+   "label": "新幹線 指定席",
+   "anchor": "train",
+   "offsetMonths": -1,
+   "offsetDays": 0,
+   "at": "10:00",
+   "mode": "exact",
+   "criticality": "singlePoint",
+   "note": "乗車1ヶ月前の同日10時。★暦月で引くこと（-30日だと1日ズレる）",
+   "cancel": {
+    "refundable": true,
+    "note": "出発前なら330円。指定席の変更は1回無料＝先に押さえて損がない"
+   }
+  },
+  {
+   "id": "smartex",
+   "label": "スマートEX 事前申込",
+   "anchor": "train",
+   "offsetMonths": -1,
+   "offsetDays": -7,
+   "at": "05:30",
+   "mode": "window",
+   "criticality": "replaceable",
+   "note": "席番指定は不可。10時に張り付けない場合の保険",
+   "cancel": {
+    "refundable": true,
+    "note": "出発前まで払戻可（手数料310円〜）"
+   }
+  },
+  {
+   "id": "hotel",
+   "label": "ホテル",
+   "anchor": "start",
+   "offsetMonths": 0,
+   "offsetDays": -365,
+   "at": null,
+   "mode": "unknown",
+   "criticality": "replaceable",
+   "note": "解禁日は非公表。一律ルールなし（3ヶ月〜1年）。推定せず365日前から監視する",
+   "observedOpenAt": null,
+   "confidence": null,
+   "anchorType": "unknown",
+   "cancel": {
+    "refundable": "unknown",
+    "note": "プランごとに規定が違う。無料キャンセル期限を控えで確認（先押さえが無リスクかはここで決まる）"
+   }
+  },
+  {
+   "id": "parkpass",
+   "label": "パークチケット",
+   "anchor": "start",
+   "offsetMonths": 0,
+   "offsetDays": 0,
+   "at": null,
+   "mode": "asap",
+   "criticality": "singlePoint",
+   "note": "変動価格。発売後も需要で値上がり＝待つほど損。混雑日は売切れる",
+   "cancel": {
+    "refundable": false,
+    "note": "日付指定券は原則キャンセル・変更不可"
+   }
+  },
+  {
+   "id": "express",
+   "label": "エクスプレス・パス",
+   "anchor": "start",
+   "offsetMonths": 0,
+   "offsetDays": 0,
+   "at": null,
+   "mode": "asap",
+   "criticality": "replaceable",
+   "note": "通常パスより先に売り切れる",
+   "cancel": {
+    "refundable": false,
+    "note": "キャンセル・変更不可"
+   }
+  },
+  {
+   "id": "restaurant",
+   "label": "レストラン優先案内",
+   "anchor": "start",
+   "offsetMonths": -1,
+   "offsetDays": 0,
+   "at": "11:00",
+   "mode": "window",
+   "criticality": "replaceable",
+   "note": "来場1ヶ月前11:00〜前日",
+   "cancel": {
+    "refundable": "unknown",
+    "note": "店舗・コースにより規定が違う。予約時に確認"
+   }
+  },
+  {
+   "id": "limobus",
+   "label": "空港リムジンバス",
+   "anchor": "flight",
+   "offsetMonths": 0,
+   "offsetDays": 0,
+   "at": null,
+   "mode": "none",
+   "criticality": "singlePoint",
+   "appliesWhen": {
+    "returnMode": "flight"
+   },
+   "note": "全便自由席・先着順。予約制度が無い＝リスクが当日に先送りされているだけ",
+   "fallback": {
+    "route": "JR経由（ゆめ咲線→大阪→伊丹）",
+    "extraMinutes": 35,
+    "decisionRule": "帰りの便から逆算し、代替経路でも間に合う最終時刻を判断点とする"
+   }
+  }
+ ]
+}
