@@ -1,2 +1,7 @@
 __pycache__/
 *.png
+
+# 実旅程は追跡しない（公開リポジトリ。名前・身長・宿・予約が入るため）
+# fixture は tests/fixtures/ の架空値だけを正とする
+trip.json
+docs/trip-*.html
