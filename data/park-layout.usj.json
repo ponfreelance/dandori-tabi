@@ -1,0 +1,27 @@
+{
+  "_comment": "パーク内の回り順（F6）が使う地理データ。ring は入口エリアから時計回りの環状順で、toNextMin は『次のエリアまでの徒歩分』（最後の要素は先頭へ戻る分）。逆回りの徒歩分は一つ手前の toNextMin を使う。待ち時間はここに持たない — 当日次第で推定できないため、assumeWaitMin は『仮定値』として画面に明示したうえで件数を数えるためだけに使う",
+  "schemaVersion": 1,
+  "park": "USJ",
+  "verifiedAt": null,
+  "source": "https://www.usj.co.jp/web/ja/jp/park-guide",
+  "entrance": "ハリウッド",
+  "openDefault": "09:00",
+  "closeDefault": null,
+  "assumeWaitMin": 45,
+  "_todo": [
+    "TODO(verify): toNextMin は公式マップからの概算で実地計測していない（verifiedAt:null）。歩測して置き換えること。子連れの実速度は概算より遅くなる",
+    "TODO(verify): openDefault は仮の既定値。開園時刻は日によって変わるので、画面から当日の値を入れて上書きする",
+    "TODO(verify): closeDefault は null（不明）のまま。閉園時刻は日によって変わるため既定値を置かない"
+  ],
+  "ring": [
+    {"area":"ハリウッド","names":["ハリウッド・エリア"],"toNextMin":4},
+    {"area":"ニューヨーク","names":["ニューヨーク・エリア"],"toNextMin":3},
+    {"area":"サンフランシスコ","names":["サンフランシスコ・エリア"],"toNextMin":4},
+    {"area":"ジュラシック","names":["ジュラシック・パーク"],"toNextMin":4},
+    {"area":"アミティ","names":["アミティ・ビレッジ"],"toNextMin":3},
+    {"area":"ウォーターワールド","names":["ウォーターワールド"],"toNextMin":6},
+    {"area":"ハリポタ","names":["ウィザーディング・ワールド・オブ・ハリー・ポッター","ハリー・ポッター・エリア"],"toNextMin":6,"gate":true,"gateNote":"繁忙期はエリア入場整理券が必要になる場合があります（当日アプリで取得）"},
+    {"area":"マリオ","names":["スーパー・ニンテンドー・ワールド","ニンテンドー・ワールド"],"toNextMin":5,"gate":true,"gateNote":"混雑時はエリア入場整理券／抽選が必要（当日アプリで取得）。取れないとエリアに入れません"},
+    {"area":"ミニオン","names":["ミニオン・パーク"],"toNextMin":4}
+  ]
+}

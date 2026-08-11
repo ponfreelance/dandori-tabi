@@ -15,6 +15,7 @@ const S = globalThis.DandoriSolver;
 
 const attractions = JSON.parse(readFileSync(join(root, 'data/attractions.usj.json'), 'utf8')).attractions;
 const rules = JSON.parse(readFileSync(join(root, 'data/booking-rules.json'), 'utf8')).rules;
+const layout = JSON.parse(readFileSync(join(root, 'data/park-layout.usj.json'), 'utf8'));
 
 // ── fixtures（実物の構造・表記ゆれを保った加工値。parse_test.py と同一） ──
 const SAMPLES = {
@@ -113,7 +114,7 @@ state.flight = flight;   // JAL876 → ANAのルールは適用外になる
 state.tickets = park.tickets.map(t => ({ ...t, until1330: null }));
 // エクスプレス券の再入場不可枠は 13:30 まで（実例と同構造）
 state.tickets[1].fixed.find(f => f.reentry === false).until = '13:30';
-S.configure({ attractions, rules, state });
+S.configure({ attractions, rules, layout, state });
 
 // 5. 身長判定（公式2026-07-23検証値・2値モデル）
 //    大人同伴が前提の家族では minHeightWithAdult で判定する。
@@ -133,10 +134,10 @@ ok('7歳100cm（大人同伴）→ ○3/△1/×6（従来と同じ）', () => {
 ok('単独利用（大人なし）は122cm基準になる', () => {
   const solo = S.emptyTrip();
   solo.people = [{ id: 'k', name: '子', age: 10, h: 120, adult: false }];
-  S.configure({ attractions, rules, state: solo });
+  S.configure({ attractions, rules, layout, state: solo });
   const kart = attractions.find(a => a.id === 'kart');
   assert.deepEqual(S.judge(solo.people[0], kart), { s: 'edge', gap: 2 });
-  S.configure({ attractions, rules, state });
+  S.configure({ attractions, rules, layout, state });
 });
 ok('上限身長（ダイナソー198cm超）と同伴時制限なし（ジョーズ×1歳）', () => {
   const fd = attractions.find(a => a.id === 'fd');
@@ -223,7 +224,7 @@ ok('予算超過 → Finding（削減候補は取消可能なものだけ・金�
   bt.train = { type: 'train', price: 30000 };
   bt.tickets = [{ name: 'ユニバーサル・エクスプレス・パス 5', price: 28000, fixed: [], free: [] },
                 { name: '1.5デイ・スタジオ・パス', price: null, fixed: [], free: [] }];
-  S.configure({ attractions, rules, state: bt });
+  S.configure({ attractions, rules, layout, state: bt });
   const f = S.solve().filter(x => x.kind === 'budget');
   assert.equal(f.length, 1);
   assert.ok(f[0].ti.includes('118,000'), '合計');
@@ -233,17 +234,17 @@ ok('予算超過 → Finding（削減候補は取消可能なものだけ・金�
   assert.ok(f[0].fix.startsWith('削減候補'), '削減候補を出す');
   assert.ok(f[0].fix.indexOf('宿') < f[0].fix.indexOf('新幹線'), '金額降順（宿6万→新幹線3万）');
   assert.ok(!f[0].fix.includes('エクスプレス'), '取消不可は削減候補に入れない');
-  S.configure({ attractions, rules, state });
+  S.configure({ attractions, rules, layout, state });
 });
 ok('予算内・予算未設定なら Finding を出さない', () => {
   const bt = S.emptyTrip();
   bt.hotel = { type: 'hotel', name: '宿', price: 60000 };
-  S.configure({ attractions, rules, state: bt });
+  S.configure({ attractions, rules, layout, state: bt });
   assert.equal(S.solve().filter(x => x.kind === 'budget').length, 0, '未設定');
   bt.budget = 100000;
-  S.configure({ attractions, rules, state: bt });
+  S.configure({ attractions, rules, layout, state: bt });
   assert.equal(S.solve().filter(x => x.kind === 'budget').length, 0, '予算内');
-  S.configure({ attractions, rules, state });
+  S.configure({ attractions, rules, layout, state });
 });
 
 // 追加検証: 新幹線控えのパース
@@ -278,7 +279,7 @@ ok('往復新幹線 → JR解禁が行き・帰りの2件、飛行機系とリ�
     { leg: 'return', mode: 'train', date: '2026-11-17' },
   ] };
   rt.people = state.people;
-  S.configure({ attractions, rules, state: rt });
+  S.configure({ attractions, rules, layout, state: rt });
   const b = S.bookings('2026-07-23');
   const jrs = b.filter(x => x.id === 'jr');
   assert.equal(jrs.length, 2);
@@ -287,7 +288,7 @@ ok('往復新幹線 → JR解禁が行き・帰りの2件、飛行機系とリ�
   assert.equal(b.filter(x => x.id === 'jal').length, 0, '飛行機を使わない旅では出さない');
   assert.equal(b.filter(x => x.id === 'limobus').length, 0);
   assert.equal(S.solve().filter(f => f.kind === 'singlePoint').length, 0, '帰りが新幹線ならバスの単一障害点は出ない');
-  S.configure({ attractions, rules, state });
+  S.configure({ attractions, rules, layout, state });
 });
 ok('v1 trip.json は v3 へ移行して読める', () => {
   const v1 = { schemaVersion: 1, trip: { start: '2026-11-15', end: '2026-11-17', trainDate: '2026-11-15', flightDate: '2026-11-17' }, people: [], constraints: [], tickets: [], hotel: null, flight: null, booked: {} };
@@ -324,7 +325,7 @@ ok('emptyState は v3・emptyTrip はスライス', () => {
 ok('部分入力で動く（未定は「これから決めること」へ）', () => {
   const partial = S.emptyTrip();
   partial.people = [{ id: 'k1', name: '子', age: 5, h: null, adult: false }];
-  S.configure({ attractions, rules, state: partial });
+  S.configure({ attractions, rules, layout, state: partial });
   const u = S.undecided();
   assert.ok(u.some(x => x.what.includes('身長')));
   assert.ok(u.some(x => x.what === '旅行日'));
@@ -343,7 +344,151 @@ ok('watchOnly ルールは①に出ない（監視②専用）', () => {
   const b = S.bookings('2026-07-25');
   assert.equal(b.filter(x => x.id === 'watch-only-test').length, 0);
   assert.ok(b.some(x => x.id === 'hotel'), '通常の unknown ルールは出る');
-  S.configure({ attractions, rules, state });
+  S.configure({ attractions, rules, layout, state });
+});
+
+// ── F6. パーク内の回り順 ──
+S.configure({ attractions, rules, layout, state });
+
+ok('環状の徒歩分は短いほうを取る（ハリウッド→マリオは逆回り9分）', () => {
+  const w = S.walk('ハリウッド', 'マリオ');
+  assert.equal(w.min, 9);                       // ハリウッド→ミニオン4→マリオ5
+  assert.deepEqual(w.path, ['ハリウッド', 'ミニオン', 'マリオ']);
+  const back = S.walk('マリオ', 'ハリウッド');
+  assert.equal(back.min, 9, '逆向きも同じ');
+  assert.equal(S.walk('ハリウッド', 'ハリウッド').min, 0);
+});
+
+ok('コースはエリア入場枠を固定点にし、隙間の件数を出す', () => {
+  const c = S.course();
+  assert.equal(c.day, '2026-11-16');            // 時間指定を持つ券の日
+  // 入れ子の3枠（SNW 11:30-13:30 / マリオカート / ヨッシー）は1ブロックに畳む
+  const fixed = c.steps.filter(s => s.kind === 'fixed');
+  assert.equal(fixed.length, 1);
+  assert.equal(fixed[0].area, 'マリオ', 'エリア入場枠の名前からエリアを解決する');
+  assert.equal(fixed[0].items.length, 3);
+  assert.equal(fixed[0].until, '13:30');
+  const first = c.steps.find(s => s.kind === 'move');
+  assert.deepEqual(first.path, ['ハリウッド', 'ミニオン', 'マリオ']);
+  assert.equal(first.walkMin, 9);
+  assert.equal(first.spanMin, 150);             // 09:00→11:30
+  assert.equal(first.restMin, 141);
+  assert.equal(first.capacity, 3);              // 待ち45分と置くと3件
+  assert.equal(c.assumeWait, 45);
+  // 時間指定で乗る2件は候補から外れ、同じエリアのトロッコは残る
+  const ids = first.items.map(i => i.id);
+  assert.ok(!ids.includes('kart') && !ids.includes('yoshi'), '固定点の分は二重に数えない');
+  assert.ok(ids.includes('donk') && ids.includes('mini'));
+  // 132cm組は子ども全員×＝大人交代（子どもスイッチ）として残す
+  assert.equal(first.items.find(i => i.id === 'hd').cls, 'switch');
+  assert.equal(first.items.find(i => i.id === 'mini').cls, 'some');
+});
+
+ok('昼寝は動かせない固定点として区間を割る', () => {
+  const c = S.course();
+  const nap = c.steps.find(s => s.kind === 'nap');
+  assert.ok(nap && nap.at === '13:30' && nap.until === '15:30');
+  assert.ok(c.steps.indexOf(nap) > c.steps.findIndex(s => s.kind === 'fixed'));
+});
+
+ok('閉園未入力なら件数を出さず、理由を出す（11/16は帰りの日ではない）', () => {
+  const c = S.course();
+  assert.equal(c.close, null);
+  const last = c.steps.filter(s => s.kind === 'move').pop();
+  assert.equal(last.capacity, null);
+  assert.equal(last.to, 'ハリウッド', '最後は出口へ戻る分も歩く');
+  assert.ok(c.warns.some(w => w.kind === 'closeUnknown'));
+});
+
+ok('帰りの日のコースは退園の締切が閉園になる', () => {
+  const ret = { ...state, tickets: [{ name: '1デイ', date: '2026-11-17', fixed: [], free: [] }] };
+  S.configure({ attractions, rules, layout, state: ret });
+  const c = S.course();
+  assert.equal(c.day, '2026-11-17');
+  assert.equal(c.close, '13:55');               // 15:35 −60(保安検査) −40(バス)
+  assert.equal(c.closeSrc, 'departure');
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('整理券エリアを時間指定で押さえていなければ警告する', () => {
+  const g = S.emptyTrip();
+  g.people = state.people;
+  g.tickets = [{ name: '1デイ', date: '2026-11-16', fixed: [], free: [] }];
+  g.parkHours = { open: '09:00', close: '19:00', waitMin: null };
+  S.configure({ attractions, rules, layout, state: g });
+  const c = S.course();
+  // 固定点が無い日は「一周する順」がコースになる → 途中のゲート付きエリアは全部対象
+  const first = c.steps.find(s => s.kind === 'move');
+  assert.equal(first.path.length, layout.ring.length + 1, '入口に戻るまでの一周');
+  assert.equal(first.walkMin, 39);
+  assert.equal(first.capacity, 12);              // (600−39)/45
+  const gate = c.warns.filter(w => w.kind === 'gate').map(w => w.ti);
+  assert.equal(gate.length, 2);
+  assert.ok(gate.some(t => t.includes('マリオ')) && gate.some(t => t.includes('ハリポタ')));
+  S.configure({ attractions, rules, layout, state });
+});
+ok('時間指定でエリアを押さえていれば整理券の警告は出ない', () => {
+  assert.equal(S.course().warns.filter(w => w.kind === 'gate').length, 0);
+});
+
+ok('窓が移動時間に足りなければ破綻として出す', () => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.parkHours = { open: '09:00', close: '19:00', waitMin: null };
+  t.tickets = [{ name: 'テスト券', date: '2026-11-16', free: [], fixed: [
+    { at: '10:00', until: '10:20', name: 'ミニオン・ハチャメチャ・ライド' },
+    { at: '10:25', until: '10:45', name: 'ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー' },
+  ] }];
+  S.configure({ attractions, rules, layout, state: t });
+  const w = S.course().warns.filter(x => x.kind === 'window');
+  assert.equal(w.length, 1);
+  assert.ok(w[0].dt.includes('徒歩11分'), 'ミニオン→マリオ5→ハリポタ6');
+  assert.ok(w[0].dt.includes('6分たりません'));  // 5分の窓に11分
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('時間指定の順序が往復を強いるなら移動のムダを出す', () => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.parkHours = { open: '09:00', close: '19:00', waitMin: null };
+  t.tickets = [{ name: 'テスト券', date: '2026-11-16', free: [], fixed: [
+    { at: '10:00', until: '10:30', name: 'ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー' },
+    { at: '12:00', until: '12:30', name: 'ハリウッド・ドリーム・ザ・ライド' },
+    { at: '14:00', until: '14:30', name: 'ヨッシー・アドベンチャー' },
+  ] }];
+  S.configure({ attractions, rules, layout, state: t });
+  const b = S.course().warns.filter(x => x.kind === 'backtrack');
+  assert.equal(b.length, 1);
+  assert.ok(b[0].ti.includes('往復'));
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('時間の余りで一周するのは「往復のムダ」に数えない', () => {
+  const t = { ...state, parkHours: { open: '09:00', close: '20:00', waitMin: null } };
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  assert.equal(c.walkMin, 39, '実際は一周する（午後の空き時間で反対側を回る）');
+  assert.equal(c.forcedWalkMin, 18, '固定点が強いるのは入口↔マリオの往復ぶんだけ');
+  assert.equal(c.warns.filter(w => w.kind === 'backtrack').length, 0);
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('地理データが無ければ course は null（別パークでも壊れない）', () => {
+  S.configure({ attractions, rules, layout: { ring: [] }, state });
+  assert.equal(S.course(), null);
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('開園・閉園の未入力は「これから決めること」へ流れる', () => {
+  const u = S.undecided();
+  assert.ok(u.some(x => x.what.includes('閉園時刻')), '11/16は帰りの日でないので逆算できない');
+  assert.ok(u.some(x => x.what.includes('開園時刻')), '既定値は「入力済み」にしない');
+  // 券に入場時間があればその日の開園は未定に出ない
+  const withEntry = { ...state, tickets: [{ name: '1デイ', date: '2026-11-16', entryTime: '10:00', fixed: [], free: [] }] };
+  S.configure({ attractions, rules, layout, state: withEntry });
+  assert.ok(!S.undecided().some(x => x.what.includes('開園時刻')));
+  assert.equal(S.course().open, '10:00');
+  S.configure({ attractions, rules, layout, state });
 });
 
 console.log(`\n${pass} 件すべて成功`);

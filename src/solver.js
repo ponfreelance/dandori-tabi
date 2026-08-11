@@ -4,14 +4,17 @@
      solve()                   -> Finding[]
      derive()                  -> Step[]
      bookings(today)           -> Booking[]
+     course(opts)              -> { steps, warns } | null   ← F6（パーク内の回り順）
    データは configure() で注入する（①はHTML埋め込み、テストは data/*.json 直読み）。 */
 (function (g) {
   'use strict';
 
   const EDGE_CM = 5;
+  const DEFAULT_WAIT = 45;
 
   let ATTRACTIONS = [];
   let RULES = [];
+  let LAYOUT = null;
   let STATE = emptyTrip();
 
   /* schemaVersion 3: trips 配列で複数旅行を持つ（ファイル形式）。
@@ -22,6 +25,8 @@
       trip: { start: null, end: null, transports: [] },
       people: [], constraints: [], tickets: [],
       hotel: null, flight: null, train: null, booked: {},
+      /* F6（回り順）用。未入力なら park-layout の既定値と「未定」で動く */
+      parkHours: { open: null, close: null, waitMin: null },
     };
   }
   function emptyState() {
@@ -49,6 +54,7 @@
   function configure(opts) {
     if (opts.attractions) ATTRACTIONS = opts.attractions;
     if (opts.rules) RULES = opts.rules;
+    if (opts.layout) LAYOUT = opts.layout;
     if (opts.state) STATE = opts.state;
   }
 
@@ -163,12 +169,8 @@
       let deadline = null, busLeave = null;
       if (dep && fb && fb.extraMinutes != null) {
         /* 帰りの便から遡って通常経路の最終出発を出し、代替経路の所要差だけ前倒しした時刻が判断点 */
-        let t = toMin(dep.at);
-        const legs = dep.legs || [];
-        const idxMove = legs.findIndex(l => /バス|移動|リムジン/.test(l.name));
-        for (let i = 0; i <= (idxMove < 0 ? legs.length - 1 : idxMove); i++) t -= legs[i].min;
-        busLeave = toStr(t);
-        deadline = toStr(t - fb.extraMinutes);
+        busLeave = parkLeave(null);
+        if (busLeave) deadline = toStr(toMin(busLeave) - fb.extraMinutes);
       }
       f.push({
         lv: 'warn', kind: 'singlePoint', ti: `単一障害点：${r.label}は予約で確保できません`,
@@ -245,6 +247,23 @@
       const key = r.id + (tg.leg && targets.length > 1 ? '@' + tg.leg : '');
       return !!STATE.booked[key];
     });
+  }
+
+  /* パークを出る時刻＝帰りの便から、移動レグまでを遡った時刻。
+     F3（逆算）とF6（回り順の締切）が同じ値を使うための共通関数。
+     day を渡すと「その日が帰りの日でなければ null」を返す（別日のパーク日に締切を持ち込まない） */
+  function parkLeave(day) {
+    const dep = (STATE.constraints || []).find(c => c.type === 'departure');
+    if (!dep || !dep.at) return null;
+    if (day) {
+      const ret = (STATE.trip.transports || []).filter(t => t.leg === 'return' && t.date);
+      if (ret.length && !ret.some(t => t.date === day)) return null;
+    }
+    let t = toMin(dep.at);
+    const legs = dep.legs || [];
+    const idxMove = legs.findIndex(l => /バス|移動|リムジン/.test(l.name));
+    for (let i = 0; i <= (idxMove < 0 ? legs.length - 1 : idxMove); i++) t -= legs[i].min;
+    return toStr(t);
   }
 
   /* ── F3. 当日逆算 ── */
@@ -368,6 +387,17 @@
     }
     if (STATE.hotel && !STATE.hotel.checkIn) u.push({ what: '宿のチェックイン日', why: '解禁監視・逆算に必要' });
     STATE.tickets.forEach(t => { if (!t.date) u.push({ what: `${t.name}の入場日`, why: '時間指定の衝突検査に必要' }); });
+    /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
+    const pday = parkDay();
+    if (ring().length && pday) {
+      const ph = STATE.parkHours || {};
+      if (!ph.open && !(STATE.tickets || []).some(t => t.date === pday && t.entryTime)) {
+        u.push({ what: `パークの開園時刻（${pday}）`, why: '最初の区間に何件入るか計算できない' });
+      }
+      if (!ph.close && !LAYOUT.closeDefault && !parkLeave(pday)) {
+        u.push({ what: `パークの閉園時刻（${pday}）`, why: '最後の区間に何件入るか計算できない' });
+      }
+    }
     bookings('2000-01-01').filter(b => b.state === '未定').forEach(b => {
       u.push({ what: `${b.label}の解禁日`, why: '基準日が未定のため逆算できない' });
     });
@@ -376,8 +406,285 @@
     return u.filter(x => !seen.has(x.what) && seen.add(x.what));
   }
 
+  /* ── F6. パーク内の回り順（コース） ──
+     ★これは「候補を出す」機能ではない。時間指定・昼寝・帰りの締切を動かせない固定点として置き、
+     その隙間ごとに「歩く分を引いたら何件入らないか」を出す＝引き算のまま順序だけを決める。
+     待ち時間は当日次第なので推定しない。仮定値（既定45分）を明示したうえで件数だけ数える。
+     地理データ（環状の順序と徒歩分）は data/park-layout.<park>.json から configure() で入る。 */
+  const num = (v, d) => (typeof v === 'number' && isFinite(v) && v > 0) ? v : d;
+  const NORM = s => (g.DandoriParser ? g.DandoriParser.norm(String(s || '')) : String(s || ''));
+  const ring = () => (LAYOUT && Array.isArray(LAYOUT.ring)) ? LAYOUT.ring : [];
+  const ringOf = area => ring().find(r => r.area === area) || null;
+  const ringIdx = area => ring().findIndex(r => r.area === area);
+
+  /* 環に沿って from→to を一方向に歩く。from===to は「一周」になる（step=±1） */
+  function arc(from, to, step) {
+    const R = ring();
+    const i = ringIdx(from), j = ringIdx(to);
+    if (i < 0 || j < 0) return { min: 0, path: [from, to].filter(Boolean), unknown: true };
+    const path = [];
+    let m = 0, k = i;
+    do {
+      path.push(R[k].area);
+      m += step > 0 ? (R[k].toNextMin || 0) : (R[(k - 1 + R.length) % R.length].toNextMin || 0);
+      k = (k + step + R.length) % R.length;
+    } while (k !== j);
+    path.push(R[j].area);
+    return { min: m, path };
+  }
+
+  /* 環状なので双方向に歩ける。短いほうを返す（経路上のエリアは通りがかりに寄れる） */
+  function walk(from, to) {
+    const i = ringIdx(from), j = ringIdx(to);
+    /* 環に無いエリア（データ未整備）は距離を作らない。順序だけ通す */
+    if (i < 0 || j < 0) return { min: 0, path: [...new Set([from, to].filter(Boolean))], unknown: true };
+    if (i === j) return { min: 0, path: [from] };
+    const f = arc(from, to, 1), b = arc(from, to, -1);
+    return f.min <= b.min ? f : b;
+  }
+
+  /* 遠回り（from===to なら一周）。同じ分数なら「乗れるものが早く出てくる向き」を取る */
+  function sweep(from, to, rideable) {
+    if (ringIdx(from) < 0 || ringIdx(to) < 0) return walk(from, to);
+    const f = arc(from, to, 1), b = arc(from, to, -1);
+    if (f.min !== b.min) return f.min > b.min ? f : b;
+    const firstHit = p => {
+      const k = p.findIndex(area => ATTRACTIONS.some(a => a.area === area && rideable(a)));
+      return k < 0 ? 99 : k;
+    };
+    return firstHit(f.path) <= firstHit(b.path) ? f : b;
+  }
+  const loopMin = () => ring().reduce((s, r) => s + (r.toNextMin || 0), 0);
+  /* 環に沿って i から j へ順方向に進む分数（i===j は一周ではなく0） */
+  function fwdMin(i, j) {
+    const R = ring();
+    let m = 0;
+    for (let k = i; k !== j; k = (k + 1) % R.length) m += R[k].toNextMin || 0;
+    return m;
+  }
+
+  /* エリア入場枠（例「スーパー・ニンテンドー・ワールド」）はアトラクションではないので
+     マスタに当たらない。別名でエリアへ寄せる */
+  function areaEntryOf(name) {
+    const n = NORM(name);
+    const hit = ring().find(r => (r.names || []).some(x => n.includes(NORM(x))));
+    if (hit) return hit.area;
+    const exact = ring().find(r => n.includes(NORM(r.area)));
+    return exact ? exact.area : null;
+  }
+
+  /* 誰が乗れるか。all=子ども全員○ / some=一部○ / switch=子どもは全員×だが大人は○ / none=誰も乗れない */
+  function rideClass(a) {
+    const kids = STATE.people.filter(p => !p.adult);
+    const adults = STATE.people.filter(p => p.adult);
+    const adultOk = adults.some(p => judge(p, a).s === 'ok');
+    if (!kids.length) return adultOk ? 'all' : 'none';
+    const ok = kids.filter(p => judge(p, a).s === 'ok');
+    if (ok.length === kids.length) return 'all';
+    if (ok.length) return 'some';
+    return adultOk ? 'switch' : 'none';
+  }
+  const cantRide = a => STATE.people.filter(p => !p.adult && judge(p, a).s !== 'ok').map(p => p.name);
+
+  /* パーク日：時間指定を持つ券の日 > 券の日 > 旅行開始日 */
+  function parkDays() {
+    const d = (STATE.tickets || []).map(t => t.date).filter(Boolean);
+    return [...new Set(d)].sort();
+  }
+  function parkDay() {
+    const fixed = (STATE.tickets || [])
+      .filter(t => t.date && (t.fixed || t.slots || []).some(s => s.at)).map(t => t.date).sort();
+    return fixed[0] || parkDays()[0] || STATE.trip.start || null;
+  }
+
+  function course(opts) {
+    opts = opts || {};
+    if (!ring().length) return null;
+    const day = opts.day || parkDay();
+    const ph = STATE.parkHours || {};
+    const wait = num(opts.waitMin, num(ph.waitMin, num(LAYOUT.assumeWaitMin, DEFAULT_WAIT)));
+    const entrance = LAYOUT.entrance || ring()[0].area;
+    const warns = [];
+
+    /* 固定点1：券の時間指定。エリア入場枠の中にライドの枠が入れ子になる形なので、重なりは1ブロックに畳む */
+    const slots = [];
+    (STATE.tickets || []).filter(t => !t.date || t.date === day).forEach(t => {
+      (t.fixed || t.slots || []).forEach(s => {
+        if (!s.at) return;
+        const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+        slots.push({ at: s.at, until: s.until || null, name: s.name, ticket: t.name,
+          area: a ? a.area : areaEntryOf(s.name), attraction: a, reentry: s.reentry });
+      });
+    });
+    slots.sort((x, y) => toMin(x.at) - toMin(y.at) ||
+      (toMin(y.until || y.at) - toMin(x.until || x.at)));
+
+    const blocks = [];
+    slots.forEach(s => {
+      const end = toMin(s.until || s.at);
+      const last = blocks[blocks.length - 1];
+      if (last && toMin(s.at) < last.end) {
+        last.end = Math.max(last.end, end);
+        last.until = toStr(last.end);
+        last.items.push(s);
+        if (!last.area) last.area = s.area;
+        if (s.reentry === false) last.reentry = false;
+        if (!s.until) last.openEnd = true;
+      } else {
+        blocks.push({ kind: 'fixed', start: toMin(s.at), end, at: s.at, until: s.until,
+          area: s.area, items: [s], reentry: s.reentry === false ? false : null, openEnd: !s.until });
+      }
+    });
+    /* 固定点2：昼寝。エリアは動かない（休むだけ）が、時間は確実に消える */
+    (STATE.constraints || []).filter(c => c.type === 'nap').forEach(c => {
+      blocks.push({ kind: 'nap', start: toMin(c.from), end: toMin(c.to),
+        at: c.from, until: c.to, area: null, label: c.label, items: [] });
+    });
+    blocks.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    /* 開園・閉園。閉園は「帰りの便からの退園締切」があればそちらが勝つ（早いほうが締切） */
+    const entry = (STATE.tickets || []).find(t => t.date === day && t.entryTime);
+    const open = ph.open || (entry && entry.entryTime) || LAYOUT.openDefault || null;
+    const leave = parkLeave(day);
+    const manualClose = ph.close || LAYOUT.closeDefault || null;
+    let close = null, closeSrc = null;
+    if (leave && manualClose) {
+      close = toMin(leave) <= toMin(manualClose) ? leave : manualClose;
+      closeSrc = close === leave ? 'departure' : (ph.close ? 'manual' : 'default');
+    } else if (leave) { close = leave; closeSrc = 'departure'; }
+    else if (manualClose) { close = manualClose; closeSrc = ph.close ? 'manual' : 'default'; }
+
+    const steps = [];
+    const used = new Set();
+    blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
+
+    let pos = entrance;
+    let cur = open ? toMin(open) : null;
+    let walked = 0;    // 実際に歩く分（遠回りを選んだぶんを含む）
+    let forced = 0;    // 固定点の順序が強いる最短の移動分（往復のムダはここで測る）
+    const visited = [entrance];
+    steps.push({ kind: 'open', at: open, area: entrance,
+      b: '入園', e: open ? (ph.open ? '入力した開園時刻' : entry ? '券の入場時間' : '開園時刻は既定値（要確認）') : '開園時刻が未入力' });
+
+    function emitWindow(to, target, isLast) {
+      const span = (cur != null && to != null) ? to - cur : null;
+      const free = a => !used.has(a.id) && rideClass(a) !== 'none';
+      const gain = p => ATTRACTIONS.filter(a => p.indexOf(a.area) >= 0 && free(a)).length;
+      const capOf = m => (span == null ? null : Math.max(0, Math.floor((span - m) / wait)));
+
+      /* 直行が既定。ただし
+         (a) 動く必要がない区間（次の固定点が同じエリア／最後の出口戻り）は一周が「回り順」そのもの
+         (b) 直行だけでは窓が埋まらない（候補 < 入る件数）ときだけ遠回りに広げる
+         ——時間が余っていないのに候補を増やすために歩くのは、引き算の逆なのでやらない */
+      let w = target ? walk(pos, target) : { min: 0, path: [pos] };
+      forced += w.min;
+      if (target && ring().length) {
+        const long = sweep(pos, target, free);
+        const fits = span == null ? (pos === target) : (span - long.min) >= wait;
+        const need = pos === target || (capOf(w.min) != null && capOf(w.min) > gain(w.path));
+        if (long.min > w.min && fits && need && gain(long.path) > gain(w.path)) w = long;
+      }
+      const rest = span != null ? span - w.min : null;
+      const cap = capOf(w.min);
+      const items = [], dropped = [];
+      w.path.forEach(area => ATTRACTIONS.filter(a => a.area === area).forEach(a => {
+        if (used.has(a.id)) return;
+        used.add(a.id);
+        const cls = rideClass(a);
+        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×' }); return; }
+        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a) });
+      }));
+      const step = { kind: 'move', at: cur != null ? toStr(cur) : null, until: to != null ? toStr(to) : null,
+        from: pos, to: target || pos, path: w.path, walkMin: w.min, spanMin: span, restMin: rest,
+        capacity: cap, items, dropped, isLast: !!isLast,
+        over: cap != null && items.length > cap, short: rest != null && rest < 0 };
+      steps.push(step);
+      walked += w.min;
+      if (target) { pos = target; if (visited[visited.length - 1] !== target) visited.push(target); }
+      if (to != null) cur = to;
+      return step;
+    }
+
+    blocks.forEach(b => {
+      if (cur != null && b.start > cur) emitWindow(b.start, b.area || pos, false);
+      else if (cur == null) emitWindow(b.start, b.area || pos, false);
+      if (b.kind === 'fixed') {
+        steps.push({ kind: 'fixed', at: b.at, until: b.until, area: b.area, reentry: b.reentry,
+          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket })) });
+        if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
+      } else {
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label });
+      }
+      cur = Math.max(cur == null ? b.end : cur, b.end);
+    });
+
+    /* 最後の区間：出口（入口エリア）へ戻る分も歩く時間として引く */
+    emitWindow(close ? toMin(close) : null, entrance, true);
+    steps.push({ kind: 'exit', at: close, area: entrance, b: 'パークを出る',
+      e: closeSrc === 'departure' ? '帰りの便から逆算した退園の締切'
+        : closeSrc === 'manual' ? '入力した閉園時刻'
+        : closeSrc === 'default' ? '閉園時刻は既定値（要確認）' : '閉園・退園の締切が未入力' });
+
+    /* ── 破綻の検出（回り順に固有のもの） ── */
+    steps.filter(s => s.kind === 'move').forEach(s => {
+      if (s.short) {
+        warns.push({ lv: 'warn', kind: 'window',
+          ti: `${s.at}–${s.until} は移動だけで足りません`,
+          dt: `${s.path.join('→')} は徒歩${s.walkMin}分。この区間は${s.spanMin}分しかないので、${-s.restMin}分たりません。`,
+          fix: '時間指定を取り直すか、間のエリアを捨てて直行する前提に切り替える。' });
+      } else if (s.over) {
+        warns.push({ lv: 'note', kind: 'capacity',
+          ti: `${s.at}–${s.until} に入るのは${s.capacity}件（候補${s.items.length}件）`,
+          dt: `${s.spanMin}分から徒歩${s.walkMin}分を引いて実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です。`,
+          fix: `先に${s.capacity}件を選び、残りは捨てる前提で並べる（${s.items.slice(0, 4).map(i => i.short).join('・')}…）。` });
+      }
+    });
+    /* エリア入場整理券：時間指定の枠で押さえていないゲート付きエリアは、当日取れないと丸ごと消える */
+    const gateAreas = [...new Set(steps.flatMap(s => s.kind === 'move' ? s.path : (s.area ? [s.area] : [])))]
+      .map(ringOf).filter(r => r && r.gate);
+    const covered = new Set(steps.filter(s => s.kind === 'fixed' && s.area).map(s => s.area));
+    gateAreas.filter(r => !covered.has(r.area)).forEach(r => {
+      warns.push({ lv: 'warn', kind: 'gate',
+        ti: `${r.area}エリアは整理券が要る場合があります`,
+        dt: `${r.gateNote || 'エリア入場に整理券が必要になる場合があります。'} 時間指定の券で押さえていないため、取れなければこの区間はまるごと消えます。`,
+        fix: '入園直後にアプリで取得を試す。取れなかったときに回る先（同じ区間の別エリア）を先に決めておく。' });
+    });
+    /* 行ったり来たり：時間指定の順序が強いる移動と、一周で回った場合の下限との差 */
+    if (visited.length > 2) {
+      const full = loopMin();
+      const idx = [...new Set(visited.map(ringIdx))].filter(i => i >= 0).sort((a, b) => a - b);
+      /* 円周上の点を全部通る閉路の下限は「一周」と「いちばん広い隙間を除いた区間の往復」の小さいほう */
+      let gap = 0;
+      idx.forEach((v, k) => { gap = Math.max(gap, fwdMin(v, idx[(k + 1) % idx.length])); });
+      const minTour = Math.min(full, 2 * (full - gap));
+      /* 比較するのは「固定点が強いる最短移動」と「同じエリアを一周で回った場合」。
+         時間が余っていて自分から遠回りしたぶん（sweep）は往復のムダではないので数えない */
+      const extra = forced - minTour;
+      if (extra >= 10) {
+        warns.push({ lv: 'note', kind: 'backtrack',
+          ti: `時間指定の順序で ${extra}分ぶん往復します`,
+          dt: `いまの並びだと必要な移動は最短でも合計${forced}分。同じエリアを一周で回れば${minTour}分で足ります（差 ${extra}分）。`,
+          fix: '時間指定を取り直せるなら、エリアの並び順（' + ring().map(r => r.area).join('→') + '）に沿う時刻へ寄せる。' });
+      }
+    }
+    if (!close) {
+      warns.push({ lv: 'note', kind: 'closeUnknown', ti: '閉園（退園）の時刻が未入力です',
+        dt: '最後の区間に何件入るかを計算できません。',
+        fix: '当日の閉園時刻を入れる。帰りの便を貼れば退園の締切から自動で入ります。' });
+    }
+    if (!open) {
+      warns.push({ lv: 'note', kind: 'openUnknown', ti: '開園（入園）の時刻が未入力です',
+        dt: '最初の区間に何件入るかを計算できません。', fix: '当日の開園時刻か、券の入場時間を入れる。' });
+    }
+
+    return { day, open, close, closeSrc, assumeWait: wait, entrance,
+      walkMin: walked, forcedWalkMin: forced, steps, warns,
+      approx: !LAYOUT.verifiedAt };
+  }
+
   g.DandoriSolver = {
     EDGE_CM, configure, emptyState, emptyTrip, migrateState, judge, effectiveMin, verdictCounts, matchAttraction,
     solve, derive, bookings, overlaps, undecided, shift, isoDate, toMin, toStr,
+    course, walk, rideClass, parkDay, parkDays, parkLeave,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
