@@ -536,6 +536,95 @@ ok('時間の余りで一周するのは「往復のムダ」に数えない', (
   S.configure({ attractions, rules, layout, state });
 });
 
+// ── 行きたいアトラクション ──
+const wantTrip = (rides, fixed) => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.parkHours = { open: '09:00', close: '19:00', waitMin: null };
+  t.tickets = [{ name: 'テスト券', date: '2026-11-16', free: [], fixed: fixed || [] }];
+  t.constraints = [{ type: 'want', rides }];
+  return t;
+};
+
+ok('行きたいものは候補の先頭に出て、時間指定で押さえていれば「確保済み」', () => {
+  const t = wantTrip(['kart', 'jaws'], [
+    { at: '11:30', until: '12:00', name: 'マリオカート ～クッパの挑戦状～' },
+  ]);
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  const kart = c.wants.find(w => w.id === 'kart');
+  assert.equal(kart.state, 'fixed');
+  assert.equal(kart.at, '11:30');
+  const jaws = c.wants.find(w => w.id === 'jaws');
+  assert.equal(jaws.state, 'planned');
+  const seg = c.steps.find(s => s.kind === 'move' && s.items.some(i => i.id === 'jaws'));
+  assert.equal(seg.items[0].id, 'jaws', '希望は候補の先頭に並べる');
+  assert.ok(seg.items[0].want);
+});
+
+ok('行きたいものが反対側にあるなら遠回りしてでも通る', () => {
+  // 入口(ハリウッド)から時計回りだとミニオン→マリオ。ジョーズ(アミティ)は反対側
+  const t = wantTrip(['jaws'], [{ at: '15:00', until: '15:30', name: 'ヨッシー・アドベンチャー' }]);
+  S.configure({ attractions, rules, layout, state: t });
+  const first = S.course().steps.find(s => s.kind === 'move');
+  assert.ok(first.path.includes('アミティ'), '希望のあるエリアを通る向きを選ぶ');
+  assert.equal(first.wantN, 1);
+});
+
+ok('行きたい件数が入る件数を超えたら、どれを捨てるかを問う', () => {
+  const t = wantTrip(['jaws', 'fj', 'jp']);
+  t.parkHours = { open: '09:00', close: '11:00', waitMin: null };   // 2時間しかない
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  const w = c.warns.find(x => x.kind === 'wantOver');
+  assert.ok(w, '超過を出す');
+  assert.ok(w.ti.includes('行きたい3件のうち'));
+  assert.ok(c.wants.every(x => x.state === 'tight'), 'どれが残るかは勝手に決めない');
+  assert.ok(w.fix.includes('順位'), '順位付けを促す');
+});
+
+ok('行きたいのに誰も乗れない／子どもが乗れないを出し分ける', () => {
+  const t = wantTrip(['fd']);            // ダイナソー132cm：子どもは全員×、大人は○
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  assert.equal(c.wants[0].cls, 'switch');
+  assert.equal(c.warns.filter(x => x.kind === 'wantSwitch').length, 1);
+  assert.equal(c.warns.filter(x => x.kind === 'wantCantRide').length, 0);
+
+  const solo = wantTrip(['fd']);
+  solo.people = [{ id: 'k', name: '子', age: 8, h: 120, adult: false }];   // 大人がいない
+  S.configure({ attractions, rules, layout, state: solo });
+  const c2 = S.course();
+  assert.equal(c2.wants[0].state, 'cantRide');
+  assert.ok(c2.warns.find(x => x.kind === 'wantCantRide').fix.includes('外す'));
+});
+
+ok('通らないエリアの希望は「寄ると何分か」を出す', () => {
+  // 11:30-13:30 マリオに固定 → 昼寝で夕方まで潰し、閉園も早いとハリポタ側へ行けない
+  const t = wantTrip(['fj'], [
+    { at: '11:30', until: '13:30', name: 'スーパー・ニンテンドー・ワールド', reentry: false },
+  ]);
+  t.parkHours = { open: '11:00', close: '14:00', waitMin: null };
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  const w = c.wants[0];
+  assert.equal(w.state, 'unreachable');
+  assert.ok(w.insert && w.insert.extra > 0, '寄り道の追加分を出す');
+  const warn = c.warns.find(x => x.kind === 'wantUnreachable');
+  assert.ok(warn.fix.includes('+' + w.insert.extra + '分'));
+});
+
+ok('避けたいエリアにある希望は「回れません」になる', () => {
+  const t = wantTrip(['jp']);            // ジュラシック
+  t.constraints.push({ type: 'avoid', areas: ['ジュラシック'], from: null, to: null, label: 'ゾンビ' });
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  assert.equal(c.wants[0].state, 'dropped');
+  assert.equal(c.wants[0].why, 'ゾンビ');
+  assert.ok(c.warns.find(x => x.kind === 'wantDropped').fix.includes('避ける時間帯'));
+  S.configure({ attractions, rules, layout, state });
+});
+
 // ── 通りたくないエリア（ゾンビ等） ──
 const avoidTrip = () => {
   const t = S.emptyTrip();

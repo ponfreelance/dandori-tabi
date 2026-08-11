@@ -631,6 +631,12 @@
     } else if (leave) { close = leave; closeSrc = 'departure'; }
     else if (manualClose) { close = manualClose; closeSrc = ph.close ? 'manual' : 'default'; }
 
+    /* 行きたいアトラクション。候補を増やす指定ではなく「外せないもの」の宣言として扱い、
+       入らない／通らない／乗れないなら破綻として出す */
+    const wantIds = new Set((STATE.constraints || [])
+      .filter(c => c.type === 'want').flatMap(c => c.rides || []));
+    const wants = [...wantIds].map(id => ATTRACTIONS.find(a => a.id === id)).filter(Boolean);
+
     const steps = [];
     const used = new Set();
     blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
@@ -647,6 +653,8 @@
       const span = (cur != null && to != null) ? to - cur : null;
       const free = a => !used.has(a.id) && rideClass(a) !== 'none';
       const gain = p => ATTRACTIONS.filter(a => p.indexOf(a.area) >= 0 && free(a)).length;
+      const gainWant = p => ATTRACTIONS.filter(a =>
+        p.indexOf(a.area) >= 0 && free(a) && wantIds.has(a.id) && !avoidAt(a.area, cur, to)).length;
       const capOf = m => (span == null ? null : Math.max(0, Math.floor((span - m) / wait)));
 
       /* 直行が既定。ただし
@@ -667,7 +675,9 @@
         const fits = span == null ? (pos === target) : (span - long.min) >= wait;
         const need = pos === target || (capOf(w.min) != null && capOf(w.min) > gain(w.path));
         const clean = !blockedOn(long.path, cur, to).length;
-        if (long.min > w.min && fits && need && clean && gain(long.path) > gain(w.path)) w = long;
+        /* 行きたいものが反対側にあるなら、窓が埋まっていても遠回りする（希望が優先） */
+        const forWant = gainWant(long.path) > gainWant(w.path) && capOf(long.min) > 0;
+        if (long.min > w.min && fits && clean && (forWant || (need && gain(long.path) > gain(w.path)))) w = long;
       }
       const blocked = blockedOn(w.path, cur, to);
       const rest = span != null ? span - w.min : null;
@@ -679,13 +689,17 @@
         const av = avoidAt(area, cur, to);
         if (av) { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: av.label || '通りたくないエリア' }); return; }
         const cls = rideClass(a);
-        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×' }); return; }
-        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a) });
+        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×', want: wantIds.has(a.id) }); return; }
+        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a), want: wantIds.has(a.id) });
       }));
+      /* 行きたいものを先に並べる。入る件数を超えたとき、上から順に取れば希望が残る */
+      items.sort((x, y) => (y.want ? 1 : 0) - (x.want ? 1 : 0));
+      const wantN = items.filter(i => i.want).length;
       const step = { kind: 'move', at: cur != null ? toStr(cur) : null, until: to != null ? toStr(to) : null,
         from: pos, to: target || pos, path: w.path, walkMin: w.min, spanMin: span, restMin: rest,
-        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked,
-        over: cap != null && items.length > cap, short: rest != null && rest < 0 };
+        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked, wantN,
+        over: cap != null && items.length > cap, short: rest != null && rest < 0,
+        wantOver: cap != null && wantN > cap };
       steps.push(step);
       walked += w.min;
       if (target) { pos = target; if (visited[visited.length - 1] !== target) visited.push(target); }
@@ -698,7 +712,8 @@
       else if (cur == null) emitWindow(b.start, b.area || pos, false);
       if (b.kind === 'fixed') {
         steps.push({ kind: 'fixed', at: b.at, until: b.until, area: b.area, reentry: b.reentry,
-          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket })) });
+          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket,
+            ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
         steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label });
@@ -727,6 +742,68 @@
           fix: `先に${s.capacity}件を選び、残りは捨てる前提で並べる（${s.items.slice(0, 4).map(i => i.short).join('・')}…）。` });
       }
     });
+    /* ── 行きたいアトラクションの行き先判定 ──
+       「入る／入らない」を1件ずつ確定させる。入らないものは理由と、寄るのに要る分を出す */
+    const moves = steps.filter(s => s.kind === 'move');
+    function insertCost(area) {
+      /* いまの並びのどこかへ寄り道するとして、いちばん安い区間と余分にかかる分 */
+      let best = null;
+      moves.forEach(s => {
+        if (avoidAt(area, s.at ? toMin(s.at) : null, s.until ? toMin(s.until) : null)) return;
+        const extra = walk(s.from, area).min + walk(area, s.to).min - s.walkMin;
+        if (!best || extra < best.extra) best = { extra, step: s };
+      });
+      return best;
+    }
+    const wantStatus = wants.map(a => {
+      const fixedAt = steps.find(s => s.kind === 'fixed' && s.items.some(i => i.ride === a.id));
+      if (fixedAt) return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'fixed', at: fixedAt.at, until: fixedAt.until };
+      const cls = rideClass(a);
+      if (cls === 'none') return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'cantRide' };
+      const drop = moves.find(s => s.dropped.some(d => d.id === a.id));
+      if (drop) {
+        const why = drop.dropped.find(d => d.id === a.id).why;
+        return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'dropped', why, at: drop.at, until: drop.until };
+      }
+      const hit = moves.find(s => s.items.some(i => i.id === a.id));
+      if (hit) {
+        /* 入る件数を超えている区間では、どれが残るかを勝手に決めない（順位は利用者が付ける） */
+        return { id: a.id, name: a.name, short: a.short, area: a.area, cls,
+          state: hit.wantOver ? 'tight' : 'planned',
+          at: hit.at, until: hit.until, capacity: hit.capacity, wantN: hit.wantN };
+      }
+      /* 経路に出てこない理由が「避けたいエリアだから」なら、そう言う（通れないのではなく避けている） */
+      const av = avoids.find(c => c.areas.indexOf(a.area) >= 0);
+      const ins = insertCost(a.area);
+      if (av && !ins) return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'dropped', why: av.label || '通りたくないエリア' };
+      return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'unreachable', insert: ins };
+    });
+
+    wantStatus.filter(w => w.state === 'cantRide').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantCantRide', ti: `行きたい ${w.short} は誰も乗れません`,
+      dt: `${w.name}（${w.area}）は、いまの身長だと家族の誰も条件を満たしません。`,
+      fix: '身長が届く人がいないので、この1件は行き先から外す。境界（あと数cm）なら02の判定を確認。' }));
+    wantStatus.filter(w => w.state === 'dropped').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantDropped', ti: `行きたい ${w.short} は回れません（${w.why}）`,
+      dt: `${w.name}（${w.area}）は ${w.at || '?'}–${w.until || '?'} の区間で対象から外れています。`,
+      fix: w.why === '全員×' ? '大人が交代で乗る（子どもスイッチ）か、行き先から外す。'
+        : '避ける時間帯・エリアを見直すか、その時間帯より前に回る順へ組み替える。' }));
+    wantStatus.filter(w => w.cls === 'switch').forEach(w => warns.push({
+      lv: 'note', kind: 'wantSwitch', ti: `行きたい ${w.short} は子どもが全員乗れません`,
+      dt: `${w.name}（${w.area}）は身長が足りず、乗れるのは大人だけです。`,
+      fix: '大人が交代で乗る（子どもスイッチ）。待ち時間はその間ぶん増えるので、区間の件数から1件減らして考える。' }));
+    wantStatus.filter(w => w.state === 'unreachable').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantUnreachable', ti: `行きたい ${w.short} は今の並びだと通りません`,
+      dt: `${w.name}は${w.area}エリア。時間指定と昼寝から決まる回り順に、このエリアが入っていません。`,
+      fix: w.insert
+        ? `${w.insert.step.at}–${w.insert.step.until} の区間に寄せると +${w.insert.extra}分（その区間の実質は${w.insert.step.restMin != null ? w.insert.step.restMin + '分' : '未計算'}）。入らなければ時間指定を取り直すか、この1件を捨てる。`
+        : '寄れる区間がありません。時間指定を取り直すか、この1件を捨てる。' }));
+    moves.filter(s => s.wantOver).forEach(s => warns.push({
+      lv: 'warn', kind: 'wantOver',
+      ti: `${s.at}–${s.until} は行きたい${s.wantN}件のうち${s.capacity}件しか入りません`,
+      dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
+      fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
+
     /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
     steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
       const why = s.dropped.length
@@ -807,7 +884,7 @@
     }
 
     return { day, open, close, closeSrc, assumeWait: wait, entrance,
-      avoids, hazards: hazards(day),
+      avoids, hazards: hazards(day), wants: wantStatus,
       walkMin: walked, forcedWalkMin: forced, steps, warns,
       approx: !LAYOUT.verifiedAt };
   }

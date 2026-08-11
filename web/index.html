@@ -159,6 +159,10 @@
   .ci.all{border-color:#B6DED0} .ci.some{border-color:#F0DDBA;background:#FDF4E6}
   .ci.switch{border-color:#D5DEE4;color:var(--muted)}
   .ci .m{font-weight:700} .ci.all .m{color:var(--pass)} .ci.some .m{color:var(--edge)}
+  .ci.want{border-color:var(--measure);box-shadow:inset 2px 0 0 var(--measure)}
+  .wst{display:flex;gap:7px;align-items:baseline;font-size:11.5px;padding:3px 0}
+  .wst .s{font-weight:700;width:76px;flex:none;font-size:11px}
+  .wst .s.ok{color:var(--pass)} .wst .s.tight{color:var(--edge)} .wst .s.ng{color:var(--block)}
   .avoid{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:12px;background:var(--soft)}
   .avoid .ah{font-size:12px;font-weight:600;margin-bottom:6px}
   .avoid .ar{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
@@ -293,6 +297,7 @@
       <label class="f">閉園<input type="time" id="c-close"></label>
       <label class="f">1件あたりの待ち（仮定・分）<input type="number" id="c-wait" min="5" max="180" step="5"></label>
     </div>
+    <div id="want"></div>
     <div id="avoid"></div>
     <div id="course"></div>
   </div>
@@ -1560,6 +1565,12 @@ window.DANDORI_DATA = {
     } else if (leave) { close = leave; closeSrc = 'departure'; }
     else if (manualClose) { close = manualClose; closeSrc = ph.close ? 'manual' : 'default'; }
 
+    /* 行きたいアトラクション。候補を増やす指定ではなく「外せないもの」の宣言として扱い、
+       入らない／通らない／乗れないなら破綻として出す */
+    const wantIds = new Set((STATE.constraints || [])
+      .filter(c => c.type === 'want').flatMap(c => c.rides || []));
+    const wants = [...wantIds].map(id => ATTRACTIONS.find(a => a.id === id)).filter(Boolean);
+
     const steps = [];
     const used = new Set();
     blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
@@ -1576,6 +1587,8 @@ window.DANDORI_DATA = {
       const span = (cur != null && to != null) ? to - cur : null;
       const free = a => !used.has(a.id) && rideClass(a) !== 'none';
       const gain = p => ATTRACTIONS.filter(a => p.indexOf(a.area) >= 0 && free(a)).length;
+      const gainWant = p => ATTRACTIONS.filter(a =>
+        p.indexOf(a.area) >= 0 && free(a) && wantIds.has(a.id) && !avoidAt(a.area, cur, to)).length;
       const capOf = m => (span == null ? null : Math.max(0, Math.floor((span - m) / wait)));
 
       /* 直行が既定。ただし
@@ -1596,7 +1609,9 @@ window.DANDORI_DATA = {
         const fits = span == null ? (pos === target) : (span - long.min) >= wait;
         const need = pos === target || (capOf(w.min) != null && capOf(w.min) > gain(w.path));
         const clean = !blockedOn(long.path, cur, to).length;
-        if (long.min > w.min && fits && need && clean && gain(long.path) > gain(w.path)) w = long;
+        /* 行きたいものが反対側にあるなら、窓が埋まっていても遠回りする（希望が優先） */
+        const forWant = gainWant(long.path) > gainWant(w.path) && capOf(long.min) > 0;
+        if (long.min > w.min && fits && clean && (forWant || (need && gain(long.path) > gain(w.path)))) w = long;
       }
       const blocked = blockedOn(w.path, cur, to);
       const rest = span != null ? span - w.min : null;
@@ -1608,13 +1623,17 @@ window.DANDORI_DATA = {
         const av = avoidAt(area, cur, to);
         if (av) { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: av.label || '通りたくないエリア' }); return; }
         const cls = rideClass(a);
-        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×' }); return; }
-        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a) });
+        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×', want: wantIds.has(a.id) }); return; }
+        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a), want: wantIds.has(a.id) });
       }));
+      /* 行きたいものを先に並べる。入る件数を超えたとき、上から順に取れば希望が残る */
+      items.sort((x, y) => (y.want ? 1 : 0) - (x.want ? 1 : 0));
+      const wantN = items.filter(i => i.want).length;
       const step = { kind: 'move', at: cur != null ? toStr(cur) : null, until: to != null ? toStr(to) : null,
         from: pos, to: target || pos, path: w.path, walkMin: w.min, spanMin: span, restMin: rest,
-        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked,
-        over: cap != null && items.length > cap, short: rest != null && rest < 0 };
+        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked, wantN,
+        over: cap != null && items.length > cap, short: rest != null && rest < 0,
+        wantOver: cap != null && wantN > cap };
       steps.push(step);
       walked += w.min;
       if (target) { pos = target; if (visited[visited.length - 1] !== target) visited.push(target); }
@@ -1627,7 +1646,8 @@ window.DANDORI_DATA = {
       else if (cur == null) emitWindow(b.start, b.area || pos, false);
       if (b.kind === 'fixed') {
         steps.push({ kind: 'fixed', at: b.at, until: b.until, area: b.area, reentry: b.reentry,
-          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket })) });
+          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket,
+            ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
         steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label });
@@ -1656,6 +1676,68 @@ window.DANDORI_DATA = {
           fix: `先に${s.capacity}件を選び、残りは捨てる前提で並べる（${s.items.slice(0, 4).map(i => i.short).join('・')}…）。` });
       }
     });
+    /* ── 行きたいアトラクションの行き先判定 ──
+       「入る／入らない」を1件ずつ確定させる。入らないものは理由と、寄るのに要る分を出す */
+    const moves = steps.filter(s => s.kind === 'move');
+    function insertCost(area) {
+      /* いまの並びのどこかへ寄り道するとして、いちばん安い区間と余分にかかる分 */
+      let best = null;
+      moves.forEach(s => {
+        if (avoidAt(area, s.at ? toMin(s.at) : null, s.until ? toMin(s.until) : null)) return;
+        const extra = walk(s.from, area).min + walk(area, s.to).min - s.walkMin;
+        if (!best || extra < best.extra) best = { extra, step: s };
+      });
+      return best;
+    }
+    const wantStatus = wants.map(a => {
+      const fixedAt = steps.find(s => s.kind === 'fixed' && s.items.some(i => i.ride === a.id));
+      if (fixedAt) return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'fixed', at: fixedAt.at, until: fixedAt.until };
+      const cls = rideClass(a);
+      if (cls === 'none') return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'cantRide' };
+      const drop = moves.find(s => s.dropped.some(d => d.id === a.id));
+      if (drop) {
+        const why = drop.dropped.find(d => d.id === a.id).why;
+        return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'dropped', why, at: drop.at, until: drop.until };
+      }
+      const hit = moves.find(s => s.items.some(i => i.id === a.id));
+      if (hit) {
+        /* 入る件数を超えている区間では、どれが残るかを勝手に決めない（順位は利用者が付ける） */
+        return { id: a.id, name: a.name, short: a.short, area: a.area, cls,
+          state: hit.wantOver ? 'tight' : 'planned',
+          at: hit.at, until: hit.until, capacity: hit.capacity, wantN: hit.wantN };
+      }
+      /* 経路に出てこない理由が「避けたいエリアだから」なら、そう言う（通れないのではなく避けている） */
+      const av = avoids.find(c => c.areas.indexOf(a.area) >= 0);
+      const ins = insertCost(a.area);
+      if (av && !ins) return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'dropped', why: av.label || '通りたくないエリア' };
+      return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'unreachable', insert: ins };
+    });
+
+    wantStatus.filter(w => w.state === 'cantRide').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantCantRide', ti: `行きたい ${w.short} は誰も乗れません`,
+      dt: `${w.name}（${w.area}）は、いまの身長だと家族の誰も条件を満たしません。`,
+      fix: '身長が届く人がいないので、この1件は行き先から外す。境界（あと数cm）なら02の判定を確認。' }));
+    wantStatus.filter(w => w.state === 'dropped').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantDropped', ti: `行きたい ${w.short} は回れません（${w.why}）`,
+      dt: `${w.name}（${w.area}）は ${w.at || '?'}–${w.until || '?'} の区間で対象から外れています。`,
+      fix: w.why === '全員×' ? '大人が交代で乗る（子どもスイッチ）か、行き先から外す。'
+        : '避ける時間帯・エリアを見直すか、その時間帯より前に回る順へ組み替える。' }));
+    wantStatus.filter(w => w.cls === 'switch').forEach(w => warns.push({
+      lv: 'note', kind: 'wantSwitch', ti: `行きたい ${w.short} は子どもが全員乗れません`,
+      dt: `${w.name}（${w.area}）は身長が足りず、乗れるのは大人だけです。`,
+      fix: '大人が交代で乗る（子どもスイッチ）。待ち時間はその間ぶん増えるので、区間の件数から1件減らして考える。' }));
+    wantStatus.filter(w => w.state === 'unreachable').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantUnreachable', ti: `行きたい ${w.short} は今の並びだと通りません`,
+      dt: `${w.name}は${w.area}エリア。時間指定と昼寝から決まる回り順に、このエリアが入っていません。`,
+      fix: w.insert
+        ? `${w.insert.step.at}–${w.insert.step.until} の区間に寄せると +${w.insert.extra}分（その区間の実質は${w.insert.step.restMin != null ? w.insert.step.restMin + '分' : '未計算'}）。入らなければ時間指定を取り直すか、この1件を捨てる。`
+        : '寄れる区間がありません。時間指定を取り直すか、この1件を捨てる。' }));
+    moves.filter(s => s.wantOver).forEach(s => warns.push({
+      lv: 'warn', kind: 'wantOver',
+      ti: `${s.at}–${s.until} は行きたい${s.wantN}件のうち${s.capacity}件しか入りません`,
+      dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
+      fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
+
     /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
     steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
       const why = s.dropped.length
@@ -1736,7 +1818,7 @@ window.DANDORI_DATA = {
     }
 
     return { day, open, close, closeSrc, assumeWait: wait, entrance,
-      avoids, hazards: hazards(day),
+      avoids, hazards: hazards(day), wants: wantStatus,
       walkMin: walked, forcedWalkMin: forced, steps, warns,
       approx: !LAYOUT.verifiedAt };
   }
@@ -2142,6 +2224,47 @@ function courseLine(s, short) {
   return `${s.at || '未定'} ${s.b}`;
 }
 
+/* 行きたいアトラクション。候補を増やす指定ではなく「外せないもの」の宣言として扱う
+   （入らない・通らない・乗れないものが破綻として出る） */
+const WANT_STATE = {
+  fixed:       { s: '確保済み',   c: 'ok',    t: '時間指定の枠で押さえています' },
+  planned:     { s: '入ります',   c: 'ok',    t: '' },
+  tight:       { s: '要選択',     c: 'tight', t: '同じ区間の希望が入る件数を超えています' },
+  dropped:     { s: '回れません', c: 'ng',    t: '' },
+  unreachable: { s: '通りません', c: 'ng',    t: '今の回り順にこのエリアが入っていません' },
+  cantRide:    { s: '乗れません', c: 'ng',    t: '身長が届く人がいません' },
+};
+
+function wantC() { return ST.constraints.find(c => c.type === 'want') || null; }
+function setWant(rides) {
+  ST.constraints = ST.constraints.filter(c => c.type !== 'want');
+  if (rides.length) ST.constraints.push({ type: 'want', rides });
+  save(); render();
+}
+
+function renderWant(c) {
+  if (!c) { $('want').innerHTML = ''; return; }
+  const on = (wantC() || {}).rides || [];
+  $('want').innerHTML = `<div class="avoid">
+    <div class="ah">行きたいアトラクション${on.length ? `（${on.length}件）` : ''}</div>
+    <div class="ar">${ATTR.map(a =>
+      `<button class="ax ${on.indexOf(a.id) >= 0 ? 'on' : ''}" data-ride="${a.id}" style="${on.indexOf(a.id) >= 0 ? 'background:var(--measure);border-color:var(--measure)' : ''}">${on.indexOf(a.id) >= 0 ? '★ ' : ''}${esc(a.short)}</button>`).join('')}</div>
+    ${c.wants.length ? `<div style="margin-top:8px">${c.wants.map(w => {
+      const st = WANT_STATE[w.state] || { s: w.state, c: '' };
+      const detail = w.state === 'fixed' ? `${w.at}〜の枠`
+        : w.state === 'planned' || w.state === 'tight' ? `${w.at}–${w.until} の区間（入るのは${w.capacity != null ? w.capacity + '件' : '未計算'}／希望${w.wantN}件）`
+        : w.state === 'dropped' ? esc(w.why)
+        : w.state === 'unreachable' ? (w.insert ? `${w.insert.step.at}–${w.insert.step.until} に寄せると +${w.insert.extra}分` : '寄れる区間がありません')
+        : st.t;
+      return `<div class="wst"><span class="s ${st.c}">${st.s}</span><span>${esc(w.short)}<span style="color:var(--muted)">｜${detail}</span></span></div>`;
+    }).join('')}</div>` : '<div class="note-sm">選ぶと「入るか／入らないか」を区間ごとに判定します。候補は増えません。</div>'}
+  </div>`;
+  $('want').querySelectorAll('.ax').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.ride;
+    setWant(on.indexOf(id) >= 0 ? on.filter(x => x !== id) : on.concat([id]));
+  }));
+}
+
 /* 通りたくないエリア（ゾンビ等）。避けるかどうかを決めるのは利用者なので、
    ハザードは「候補」として出すだけで、勝手には避けない */
 function avoidC() {
@@ -2189,6 +2312,7 @@ function renderAvoid(c) {
 
 function renderCourse() {
   const c = LAYOUT ? S.course({ day: courseDay }) : null;
+  renderWant(c);
   renderAvoid(c);
   const ph = parkHours();
   const days = S.parkDays();
@@ -2218,7 +2342,7 @@ function renderCourse() {
         ? '<span class="budget">開園・閉園が未入力の区間。順序だけ出しています</span>'
         : `<span class="budget ${s.short || s.over ? 'tight' : ''}">${s.spanMin}分 − 徒歩${s.walkMin}分 = 実質${s.restMin}分 → 待ち${c.assumeWait}分なら <b>${s.capacity}件</b>（候補${s.items.length}件）</span>`;
       const chips = s.items.map(i =>
-        `<span class="ci ${i.cls}"><span class="m">${RIDE_MARK[i.cls]}</span> ${esc(i.short)}${
+        `<span class="ci ${i.cls} ${i.want ? 'want' : ''}"><span class="m">${i.want ? '★' : RIDE_MARK[i.cls]}</span> ${esc(i.short)}${
           i.cls === 'switch' ? '（大人交代）' : i.cls === 'some' && i.ng.length ? `（${i.ng.map(esc).join('・')}×）` : ''}</span>`).join('');
       return `<div class="cstep"><div class="t mono">${s.at || '--:--'}–${s.until || '--:--'}</div>
         <div class="b"><span class="path">${esc(s.path.join(' → '))}</span>
@@ -2342,6 +2466,14 @@ function exportImage() {
     lines.push({ t: `パーク内の回り順（${C.day || '日付未定'}）`, s: 22, b: true, c: '#12202E' });
     C.avoids.forEach(a => wrap(`　${a.label}を避ける前提：${a.areas.join('・')}${a.from ? `（${a.from}〜${a.to || '閉園'}）` : ''}`, 40)
       .forEach(w => lines.push({ t: w, s: 15, c: '#C0453B' })));
+    if (C.wants.length) {
+      const okw = C.wants.filter(w => w.state === 'planned' || w.state === 'fixed');
+      wrap(`　行きたい ${C.wants.length}件のうち入るのは ${okw.length}件：${okw.map(w => w.short).join('・') || 'なし'}`, 40)
+        .forEach(w => lines.push({ t: w, s: 15, c: '#5A6B7A' }));
+      C.wants.filter(w => w.state !== 'planned' && w.state !== 'fixed').forEach(w =>
+        wrap(`　× ${w.short}：${(WANT_STATE[w.state] || {}).s || w.state}`, 40)
+          .forEach(x => lines.push({ t: x, s: 15, c: '#C0453B' })));
+    }
     C.steps.slice(0, 8).forEach(s => wrap('・' + courseLine(s, true), 42)
       .forEach(w => lines.push({ t: w, s: 16, c: s.kind === 'fixed' ? '#12202E' : '#5A6B7A' })));
     lines.push({ t: `　※件数は待ち${C.assumeWait}分と置いた場合の目安。徒歩分は概算です`, s: 14, c: '#5A6B7A' });
