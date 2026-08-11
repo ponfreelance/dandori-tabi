@@ -14,6 +14,7 @@ html = html_path.read_text(encoding='utf-8')
 
 attractions = json.loads((root / 'data' / 'attractions.usj.json').read_text(encoding='utf-8'))
 rules = json.loads((root / 'data' / 'booking-rules.json').read_text(encoding='utf-8'))
+layout = json.loads((root / 'data' / 'park-layout.usj.json').read_text(encoding='utf-8'))
 # 実監視の宿・日付が公開物へ混入しないよう、埋め込みでは
 # (a) watchOnly ルールを丸ごと除外（label/note に実宿名・実日付を持つ）
 # (b) 残りのルールから watch キーを落とす（①は watch を読まない）
@@ -21,7 +22,8 @@ rules['rules'] = [r for r in rules['rules'] if not r.get('watchOnly')]
 for r in rules['rules']:
     r.pop('watch', None)
 data_js = 'window.DANDORI_DATA = ' + json.dumps(
-    {'attractions': attractions, 'bookingRules': rules}, ensure_ascii=False, indent=1) + ';'
+    {'attractions': attractions, 'bookingRules': rules, 'layout': layout},
+    ensure_ascii=False, indent=1) + ';'
 
 lib_js = '\n'.join(
     (root / 'src' / f).read_text(encoding='utf-8') for f in ['parser.js', 'solver.js'])
