@@ -547,6 +547,16 @@
     return fixed[0] || parkDays()[0] || STATE.trip.start || null;
   }
 
+  /* 画面が「通りたくないエリア」を並べるための一覧（環の順） */
+  const areas = () => ring().map(r => r.area);
+
+  /* 期間中に出るもの（ゾンビ等）。避けるかどうかを決めるのは利用者なので、ここは候補を返すだけ */
+  function hazards(day) {
+    const hs = (LAYOUT && LAYOUT.hazards) || [];
+    if (!day) return hs;
+    return hs.filter(h => !h.season || (day >= h.season.from && day <= h.season.to));
+  }
+
   function course(opts) {
     opts = opts || {};
     if (!ring().length) return null;
@@ -555,6 +565,23 @@
     const wait = num(opts.waitMin, num(ph.waitMin, num(LAYOUT.assumeWaitMin, DEFAULT_WAIT)));
     const entrance = LAYOUT.entrance || ring()[0].area;
     const warns = [];
+
+    /* ── 通りたくないエリア（例：ホラー・ナイトのゾンビ）──
+       時間帯つきの通行止めとして扱う。環状なので反対回りで避けられることが多い。
+       避けられない場合は「避けられない」と出す（黙って通す道を引かない） */
+    const avoids = (STATE.constraints || [])
+      .filter(c => c.type === 'avoid' && (c.areas || []).length);
+    function avoidAt(area, from, to) {
+      return avoids.find(c => {
+        if (c.areas.indexOf(area) < 0) return false;
+        if (from == null || to == null) return true;   // 時刻が不明なら「かかりうる」側に倒す
+        const a = c.from ? toMin(c.from) : 0;
+        const b = c.to ? toMin(c.to) : 24 * 60;
+        return from < b && a < to;
+      });
+    }
+    const blockedOn = (path, from, to) =>
+      [...new Set(path)].filter(area => avoidAt(area, from, to));
 
     /* 固定点1：券の時間指定。エリア入場枠の中にライドの枠が入れ子になる形なので、重なりは1ブロックに畳む */
     const slots = [];
@@ -628,25 +655,36 @@
          ——時間が余っていないのに候補を増やすために歩くのは、引き算の逆なのでやらない */
       let w = target ? walk(pos, target) : { min: 0, path: [pos] };
       forced += w.min;
+      /* 通りたくないエリアを跨がない向きがあるなら、遠回りでもそちらを取る */
+      let detour = 0;
+      if (target && pos !== target && avoids.length && blockedOn(w.path, cur, to).length) {
+        const clean = [arc(pos, target, 1), arc(pos, target, -1)]
+          .filter(x => !blockedOn(x.path, cur, to).length).sort((x, y) => x.min - y.min)[0];
+        if (clean) { detour = clean.min - w.min; w = clean; }
+      }
       if (target && ring().length) {
         const long = sweep(pos, target, free);
         const fits = span == null ? (pos === target) : (span - long.min) >= wait;
         const need = pos === target || (capOf(w.min) != null && capOf(w.min) > gain(w.path));
-        if (long.min > w.min && fits && need && gain(long.path) > gain(w.path)) w = long;
+        const clean = !blockedOn(long.path, cur, to).length;
+        if (long.min > w.min && fits && need && clean && gain(long.path) > gain(w.path)) w = long;
       }
+      const blocked = blockedOn(w.path, cur, to);
       const rest = span != null ? span - w.min : null;
       const cap = capOf(w.min);
       const items = [], dropped = [];
       w.path.forEach(area => ATTRACTIONS.filter(a => a.area === area).forEach(a => {
         if (used.has(a.id)) return;
         used.add(a.id);
+        const av = avoidAt(area, cur, to);
+        if (av) { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: av.label || '通りたくないエリア' }); return; }
         const cls = rideClass(a);
         if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×' }); return; }
         items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a) });
       }));
       const step = { kind: 'move', at: cur != null ? toStr(cur) : null, until: to != null ? toStr(to) : null,
         from: pos, to: target || pos, path: w.path, walkMin: w.min, spanMin: span, restMin: rest,
-        capacity: cap, items, dropped, isLast: !!isLast,
+        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked,
         over: cap != null && items.length > cap, short: rest != null && rest < 0 };
       steps.push(step);
       walked += w.min;
@@ -689,6 +727,47 @@
           fix: `先に${s.capacity}件を選び、残りは捨てる前提で並べる（${s.items.slice(0, 4).map(i => i.short).join('・')}…）。` });
       }
     });
+    /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
+    steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
+      const why = s.dropped.length
+        ? `通り道の${s.dropped.map(d => d.short).join('・')}は対象外です（${[...new Set(s.dropped.map(d => d.why))].join('・')}）。`
+        : '通り道のアトラクションは、この日すでに別の区間へ割り当て済みです。';
+      warns.push({ lv: 'note', kind: 'emptyWindow',
+        ti: `${s.at}–${s.until} は回る先がありません（${s.capacity}件ぶんの時間が空く）`,
+        dt: `${s.path.join('→')} を歩く想定ですが、${why}`,
+        fix: avoids.length
+          ? '避ける範囲を見直すか、この時間は再訪（もう一度乗る）・ショー・食事に充てる。早めに切り上げる判断もここで。'
+          : 'この時間は再訪（もう一度乗る）・ショー・食事に充てる。早めに切り上げる判断もここで。' });
+    });
+
+    /* 通りたくないエリア：避けられたか、避けられなかったかを必ず言う */
+    steps.filter(s => s.kind === 'move').forEach(s => {
+      if (s.blocked && s.blocked.length) {
+        const av = avoidAt(s.blocked[0], s.at ? toMin(s.at) : null, s.until ? toMin(s.until) : null);
+        const label = (av && av.label) || '通りたくないエリア';
+        warns.push({ lv: 'warn', kind: 'avoid',
+          ti: `${s.blocked.join('・')} を通らずに行けません（${label}）`,
+          dt: `${s.at || '?'}–${s.until || '?'} の移動 ${s.path.join('→')} は、この時間帯に避けたいエリアを通ります。`
+            + (s.isLast ? `出口は${entrance}なので、閉園前に出るなら必ず通ります。` : `反対回りにしても ${s.to} へは届きません。`),
+          fix: s.isLast
+            ? `${av && av.from ? av.from : 'その時間'}より前に出るか、通る前提で支度する（子どもを抱っこ・前を歩く・イヤーマフ）。`
+            : `この区間の時間指定を取り直すか、${s.to} 側を捨てて手前で折り返す。` });
+      } else if (s.detour > 0) {
+        warns.push({ lv: 'note', kind: 'detour',
+          ti: `${s.at}–${s.until} は +${s.detour}分の遠回りで避けています`,
+          dt: `${s.path.join('→')}（徒歩${s.walkMin}分）。短い向きは避けたいエリアを通るので、反対回りにしました。`,
+          fix: '遠回りぶんは実質時間から引いてあります。件数が足りなければ、この区間で回る先を減らす。' });
+      }
+    });
+    steps.filter(s => s.kind === 'fixed' && s.area).forEach(s => {
+      const av = avoidAt(s.area, toMin(s.at), toMin(s.until || s.at));
+      if (!av) return;
+      warns.push({ lv: 'warn', kind: 'avoidFixed',
+        ti: `時間指定が ${s.area} にあります（${av.label || '避けたいエリア'}）`,
+        dt: `${s.at}${s.until ? '–' + s.until : '〜'} の ${s.items.map(i => i.name).join('／')} は、避けたい時間帯・エリアと重なります。`,
+        fix: '枠を取り直せるなら早い時間へ。取り直せないなら、この枠を捨てるか通る前提で支度する。' });
+    });
+
     /* エリア入場整理券：時間指定の枠で押さえていないゲート付きエリアは、当日取れないと丸ごと消える */
     const gateAreas = [...new Set(steps.flatMap(s => s.kind === 'move' ? s.path : (s.area ? [s.area] : [])))]
       .map(ringOf).filter(r => r && r.gate);
@@ -728,6 +807,7 @@
     }
 
     return { day, open, close, closeSrc, assumeWait: wait, entrance,
+      avoids, hazards: hazards(day),
       walkMin: walked, forcedWalkMin: forced, steps, warns,
       approx: !LAYOUT.verifiedAt };
   }
@@ -735,6 +815,6 @@
   g.DandoriSolver = {
     EDGE_CM, configure, emptyState, emptyTrip, migrateState, judge, effectiveMin, verdictCounts, matchAttraction,
     solve, derive, bookings, overlaps, undecided, shift, isoDate, toMin, toStr,
-    course, walk, rideClass, parkDay, parkDays, parkLeave,
+    course, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

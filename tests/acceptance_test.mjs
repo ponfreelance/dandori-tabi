@@ -536,6 +536,98 @@ ok('時間の余りで一周するのは「往復のムダ」に数えない', (
   S.configure({ attractions, rules, layout, state });
 });
 
+// ── 通りたくないエリア（ゾンビ等） ──
+const avoidTrip = () => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.parkHours = { open: '09:00', close: '21:00', waitMin: null };
+  t.tickets = [{ name: '1デイ', date: '2026-10-10', fixed: [], free: [] }];
+  return t;
+};
+
+ok('ハザードは期間内の日だけ候補に出す（避けるのは利用者が決める）', () => {
+  assert.equal(S.hazards('2026-10-10').length, 1, 'ホラー・ナイト期間内');
+  assert.equal(S.hazards('2026-08-11').length, 0, '期間外は出さない');
+  const h = S.hazards('2026-10-10')[0];
+  assert.equal(h.from, '18:00');
+  assert.equal(h.verifiedAt, null, '未検証であることを持つ');
+  const t = avoidTrip();
+  S.configure({ attractions, rules, layout, state: t });
+  assert.equal(S.course().avoids.length, 0, '候補があっても勝手には避けない');
+  assert.equal(S.course().warns.filter(w => w.kind === 'avoid').length, 0);
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('避けたいエリアは候補から外れ、反対回りで迂回する', () => {
+  const t = avoidTrip();
+  // 17:30–18:00 にアミティの時間指定 → 以降は入口(ハリウッド)へ戻る。
+  // 短いのは アミティ→ジュラシック→SF→NY→ハリウッド（15分）だが、18時以降は通れない
+  t.tickets = [{ name: 'テスト券', date: '2026-10-10', free: [], fixed: [
+    { at: '17:30', until: '18:00', name: 'ジョーズ' },
+  ] }];
+  t.constraints = [{ type: 'avoid', areas: ['ジュラシック'], from: '18:00', to: null, label: 'ゾンビ' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  const moves = c.steps.filter(s => s.kind === 'move');
+  assert.equal(moves[0].detour, 0, '18時より前の区間は迂回しない');
+  const last = moves.pop();
+  assert.ok(!last.path.includes('ジュラシック'), '18時以降はジュラシックを通らない');
+  assert.ok(last.path.includes('ハリポタ') && last.path.includes('ミニオン'), '反対回りで入口へ戻る');
+  assert.equal(last.detour, 9, '15分の道を24分で迂回する');
+  const d = c.warns.find(w => w.kind === 'detour');
+  assert.ok(d && d.ti.includes('遠回り'));
+  assert.equal(c.warns.filter(w => w.kind === 'avoid').length, 0, '避けられたなら警告は出さない');
+});
+
+ok('避けた結果、回る先が無くなった区間を出す', () => {
+  const t = avoidTrip();
+  t.tickets = [{ name: 'テスト券', date: '2026-10-10', free: [], fixed: [
+    { at: '17:30', until: '18:00', name: 'ジョーズ' },
+  ] }];
+  t.constraints = [{ type: 'avoid', areas: ['ジュラシック'], from: '18:00', to: null, label: 'ゾンビ' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const e = S.course().warns.filter(w => w.kind === 'emptyWindow');
+  assert.equal(e.length, 1, '夕方は迂回路の乗り物を午前に使い切っている');
+  assert.ok(e[0].ti.includes('回る先がありません'));
+  assert.ok(e[0].fix.includes('早めに切り上げる'), '撤退という判断を出す');
+});
+
+ok('避けられない場合は「避けられない」と出す（黙って通さない）', () => {
+  const t = avoidTrip();
+  t.constraints = [{ type: 'avoid', areas: ['ハリウッド'], from: '18:00', to: null, label: 'ゾンビ' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const w = S.course().warns.filter(x => x.kind === 'avoid');
+  assert.equal(w.length, 1);
+  assert.ok(w[0].ti.includes('ハリウッド') && w[0].ti.includes('ゾンビ'));
+  assert.ok(w[0].dt.includes('出口はハリウッド'), '出口が避けたいエリアにあることを言う');
+  assert.ok(w[0].fix.includes('18:00より前に出る'), '行動を出す');
+});
+
+ok('時間指定が避けたいエリア・時間帯にあれば破綻として出す', () => {
+  const t = avoidTrip();
+  t.tickets = [{ name: 'テスト券', date: '2026-10-10', free: [], fixed: [
+    { at: '19:00', until: '19:30', name: 'ジュラシック・パーク・ザ・ライド' },
+  ] }];
+  t.constraints = [{ type: 'avoid', areas: ['ジュラシック'], from: '18:00', to: null, label: 'ゾンビ' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const w = S.course().warns.filter(x => x.kind === 'avoidFixed');
+  assert.equal(w.length, 1);
+  assert.ok(w[0].ti.includes('ジュラシック'));
+  S.configure({ attractions, rules, layout, state });
+});
+
+ok('避ける時間帯の外なら普通に通れる（終日ではない）', () => {
+  const t = avoidTrip();
+  t.parkHours = { open: '09:00', close: '17:00', waitMin: null };   // 18時前に退園
+  t.constraints = [{ type: 'avoid', areas: ['ジュラシック', 'ハリウッド'], from: '18:00', to: null, label: 'ゾンビ' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const c = S.course();
+  assert.equal(c.warns.filter(w => w.kind === 'avoid' || w.kind === 'detour').length, 0);
+  assert.ok(c.steps.some(s => s.kind === 'move' && s.path.includes('ジュラシック')), '17時までなら通れる');
+  assert.ok(c.steps.every(s => s.kind !== 'move' || !s.dropped.some(d => d.why === 'ゾンビ')));
+  S.configure({ attractions, rules, layout, state });
+});
+
 ok('地理データが無ければ course は null（別パークでも壊れない）', () => {
   S.configure({ attractions, rules, layout: { ring: [] }, state });
   assert.equal(S.course(), null);
