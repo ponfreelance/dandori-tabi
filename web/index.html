@@ -426,8 +426,8 @@ window.DANDORI_DATA = {
   ]
  },
  "bookingRules": {
-  "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）",
-  "schemaVersion": 3,
+  "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）。schemaVersion 4: offset* は『窓の開き』であって締切ではない。閉じる側を end{offsetMonths,offsetDays,at} で持つ（省略時は anchor 当日＝乗車日・搭乗日・来園日に閉じる）。解禁済み・未確保は『期限切れ』ではなく『受付中』",
+  "schemaVersion": 4,
   "rules": [
    {
     "id": "jal",
@@ -470,10 +470,35 @@ window.DANDORI_DATA = {
     "at": "10:00",
     "mode": "exact",
     "criticality": "singlePoint",
-    "note": "乗車1ヶ月前の同日10時。★暦月で引くこと（-30日だと1日ズレる）",
+    "note": "乗車1ヶ月前の同日10時＝きっぷの発売開始。席番を選べるのはここから（1年前予約の席の変更も10時以降）。★暦月で引くこと（-30日だと1日ズレる）",
+    "verifiedAt": "2026-08-11",
+    "source": "https://faq.expy.jp/faq/show/281?category_id=98&site_domain=smart-ex",
     "cancel": {
      "refundable": true,
      "note": "出発前なら330円。指定席の変更は1回無料＝先に押さえて損がない"
+    }
+   },
+   {
+    "id": "smartex1y",
+    "label": "スマートEX 1年前予約",
+    "anchor": "train",
+    "offsetMonths": -12,
+    "offsetDays": 0,
+    "at": "05:30",
+    "end": {
+     "offsetMonths": -1,
+     "offsetDays": 0,
+     "at": "07:30"
+    },
+    "mode": "window",
+    "criticality": "replaceable",
+    "note": "乗車1年前（前年同日）5:30から乗車1ヶ月前7:30まで。1ヶ月前の10時を待たずに今すぐ押さえられる。ただし座席数に限りがあり、早特・S Work席・車いす対応座席・お子さま連れ車両は対象外（スマートEX会員のみ）",
+    "caution": "座席を選べません。列車番号・座席は乗車1ヶ月前8:00以降に確定してメールで通知され、席を選び直せるのは10:00から。並び席が要る家族連れは、席が離れて確定する可能性を織り込むこと",
+    "verifiedAt": "2026-08-11",
+    "source": "https://smart-ex.jp/reservation/useful/pre_time/",
+    "cancel": {
+     "refundable": true,
+     "note": "予約完了と同時に決済。列車・座席が未確定でも払戻には手数料がかかる"
     }
    },
    {
@@ -483,9 +508,17 @@ window.DANDORI_DATA = {
     "offsetMonths": -1,
     "offsetDays": -7,
     "at": "05:30",
+    "end": {
+     "offsetMonths": -1,
+     "offsetDays": 0,
+     "at": "07:30"
+    },
     "mode": "window",
     "criticality": "replaceable",
-    "note": "席番指定は不可。10時に張り付けない場合の保険",
+    "note": "発売開始日（乗車1ヶ月前）の7日前5:30から発売開始日当日7:30まで。席番指定は不可。10時に張り付けない場合の保険",
+    "caution": "申し込んでも予約が成立しない場合があります（発売手続時に満席なら不成立）。結果は発売開始日8:00以降にメール＝押さえられたか分かるのは当日の朝",
+    "verifiedAt": "2026-08-11",
+    "source": "https://smart-ex.jp/topics/detail/?id=738",
     "cancel": {
      "refundable": true,
      "note": "出発前まで払戻可（手数料310円〜）"
@@ -546,6 +579,11 @@ window.DANDORI_DATA = {
     "offsetMonths": -1,
     "offsetDays": 0,
     "at": "11:00",
+    "end": {
+     "offsetMonths": 0,
+     "offsetDays": -1,
+     "at": null
+    },
     "mode": "window",
     "criticality": "replaceable",
     "note": "来場1ヶ月前11:00〜前日",
@@ -962,8 +1000,10 @@ window.DANDORI_DATA = {
       a.short === n || a.id === n) || null;
   }
 
-  /* ── F2〜F5. 破綻検出 ── */
-  function solve() {
+  /* ── F2〜F5. 破綻検出 ──
+     today（ISO日付）を渡すと「もう予約できるのに押さえていない」も検出する（G）。
+     省略時は日付に依存する検出だけを飛ばす */
+  function solve(today) {
     const f = [];
     const kids = STATE.people.filter(p => !p.adult);
     const naps = STATE.constraints.filter(c => c.type === 'nap');
@@ -1055,6 +1095,35 @@ window.DANDORI_DATA = {
         ti: `取消不可：${nonRef.map(r => r.label).join('・')}は買うと戻せません`,
         dt: `${pendingLabels.join('、')}がまだ確定していません。先に取消不可のものを買うと、これらが取れなかったとき費用が戻りません。`,
         fix: '取り消せるもの（新幹線330円・宿の無料キャンセル枠など）から先に確定し、取消不可のものは依存が固まり次第すぐ買う。変動価格の値上がりとのトレードオフはあるが、順序だけは守る。',
+      });
+    }
+
+    /* G. ★もう予約できるのに押さえていない。
+       解禁日を過ぎた窓は「期限切れ」ではなく開いている。待つほど席は減り、
+       窓自体に閉じる時刻があるもの（事前申込・1年前予約）は、過ぎたら二度と使えない。
+       取消できるかで行動が変わるので、cancel を必ず添えて出す */
+    if (today) {
+      const byRule = {};
+      bookings(today).filter(b => b.state === '受付中')
+        .forEach(b => (byRule[b.id] = byRule[b.id] || []).push(b));
+      Object.values(byRule).forEach(bs => {
+        const near = bs.slice().sort((a, b) => (a.endDays ?? 9999) - (b.endDays ?? 9999))[0];
+        const r = bs[0];
+        const cx = r.cancel || {};
+        const act = cx.refundable === true
+          ? `取り消せる（${cx.note || '要確認'}）。取り消せるものから先に確定させる順序でよい。`
+          : cx.refundable === false
+            ? '取消不可。宿・便が確定してから買う（順序を守る）。'
+            : `取消規定を先に確認（${cx.note || '要確認'}）。`;
+        f.push({
+          lv: r.criticality === 'singlePoint' ? 'warn' : 'note',
+          kind: 'openNow', ruleId: r.id,
+          ti: `もう予約できます：${bs.map(b => b.label).join('・')}`,
+          dt: `${r.iso}${r.at ? ' ' + r.at : ''} に解禁済みで、いま受付中です。`
+            + (near.endIso ? `${near.endIso}${near.endAt ? ' ' + near.endAt : ''} で締切（あと${near.endDays}日）。` : '')
+            + (r.note || ''),
+          fix: act + (r.caution ? ` ※${r.caution}` : ''),
+        });
       });
     }
 
@@ -1176,6 +1245,16 @@ window.DANDORI_DATA = {
     return transportsDecided() ? [] : [{ date: null, leg: null }];
   }
 
+  /* ★offset* は「窓が開く日」であって締切ではない。解禁日を過ぎた＝もう予約できる（受付中）。
+     これを「期限切れ」と表示すると、いま押さえられるものを取り逃す。
+     窓が閉じる側は rule.end（省略時は anchor 当日＝乗車日・搭乗日・来園日）。
+     ※日付粒度で判定する（today は日付のみ）。開く/閉じる当日は時刻を併記して判断を委ねる */
+  function windowEnd(r, base) {
+    if (!base) return null;
+    const e = r.end || { offsetMonths: 0, offsetDays: 0, at: null };
+    return { when: shift(base, e.offsetMonths || 0, e.offsetDays || 0), at: e.at || null };
+  }
+
   function bookings(today) {
     const T = new Date(today + 'T00:00:00');
     const out = [];
@@ -1186,26 +1265,35 @@ window.DANDORI_DATA = {
         const needsDate = !(r.mode === 'asap' || r.mode === 'none');
         const when = (base && needsDate) ? shift(base, r.offsetMonths || 0, r.offsetDays || 0) : null;
         const days = when ? Math.round((when - T) / 86400000) : null;
+        const end = (r.mode === 'none' || r.mode === 'unknown') ? null : windowEnd(r, base);
+        const endDays = end ? Math.round((end.when - T) / 86400000) : null;
         const key = r.id + (tg.leg && targets.length > 1 ? '@' + tg.leg : '');
         const done = !!STATE.booked[key];
+        const open = days !== null && days < 0;                 // 解禁済み
+        const closed = endDays !== null && endDays < 0;         // 窓が閉じた
         const state =
           r.mode === 'none' ? '予約不可' :
           done ? '済' :
           (needsDate && !base) ? '未定' :
           r.mode === 'unknown' ? '監視中' :
-          (days !== null && days < 0) ? '期限切れ' : '未';
+          closed ? '締切' :
+          open ? '受付中' : '未';
         out.push({
           ...r, when, days, done, key,
           label: r.label + (tg.leg && targets.length > 1 ? `（${LEG_LABEL[tg.leg]}）` : ''),
           iso: when ? isoDate(when) : null,
+          endIso: end ? isoDate(end.when) : null, endAt: end ? end.at : null, endDays,
           state,
         });
       });
     });
     return out.sort((a, b) => {
-      const rank = x => x.state === '未' ? 0 : x.state === '監視中' ? 1 : x.state === '未定' ? 2 :
-                        x.state === '予約不可' ? 3 : x.state === '済' ? 4 : 5;
+      /* 受付中＝いま行動できる。いちばん上に置く（下に埋もれると取り逃す） */
+      const rank = x => x.state === '受付中' ? 0 : x.state === '未' ? 1 : x.state === '監視中' ? 2 :
+                        x.state === '未定' ? 3 : x.state === '予約不可' ? 4 : x.state === '済' ? 5 : 6;
       if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      /* 受付中どうしは「先に閉じる窓」が上 */
+      if (a.state === '受付中' && b.state === '受付中') return (a.endDays ?? 9999) - (b.endDays ?? 9999);
       return (a.days ?? 9999) - (b.days ?? 9999);
     });
   }
@@ -1902,10 +1990,10 @@ function renderRulerVerdict() {
 }
 
 function renderFindings() {
-  const F = S.solve();
+  const F = S.solve(todayIso());   // today を渡すと「もう予約できる」も出る
   $('findings').innerHTML = F.length ? F.map(x =>
     `<div class="fd ${x.kind === 'singlePoint' ? 'spof' : ''}">
-      <div class="ic ${x.lv}">${x.lv === 'warn' ? '!' : x.lv === 'note' ? 'i' : '✓'}</div>
+      <div class="ic ${x.kind === 'openNow' ? 'watch' : x.lv}">${x.kind === 'openNow' ? '▶' : x.lv === 'warn' ? '!' : x.lv === 'note' ? 'i' : '✓'}</div>
       <div class="bd"><div class="ti">${esc(x.ti)}</div><div class="dt">${esc(x.dt)}</div>
       ${x.fix ? `<div class="fix">${esc(x.fix)}</div>` : ''}</div></div>`).join('')
     : '<div class="fd"><div class="ic good">✓</div><div class="bd"><div class="ti">衝突なし</div><div class="dt">現在の入力では破綻する箇所は見つかりません（入力が少ないほど検出も少なくなります）。</div></div></div>';
@@ -2014,16 +2102,24 @@ function renderBooking() {
     `<div class="ovl">⚠ <b class="mono">${o.day}</b> は締切が重なります：${o.items.map(esc).join(' / ')}。同じ日に二つ張り付く前提で段取りを。</div>`).join('') : '';
 
   $('booking').innerHTML = S.bookings(today).map(b => {
-    const cls = b.state === '未' ? (b.days !== null && b.days <= 30 ? 'ic warn' : 'ic note')
+    const cls = b.state === '受付中' ? 'ic watch'
+      : b.state === '未' ? (b.days !== null && b.days <= 30 ? 'ic warn' : 'ic note')
       : b.state === '済' ? 'ic good'
       : b.state === '監視中' ? 'ic watch'
       : b.state === '予約不可' ? 'ic warn' : 'ic none';
-    const mark = b.state === '未' ? '!' : b.state === '済' ? '✓' : b.state === '監視中' ? '👁' : b.state === '予約不可' ? '!' : '–';
-    const when = b.mode === 'asap' ? '今すぐ（締切なし・待つほど損）'
+    const mark = b.state === '受付中' ? '▶' : b.state === '未' ? '!' : b.state === '済' ? '✓'
+      : b.state === '監視中' ? '👁' : b.state === '予約不可' ? '!' : '–';
+    /* ★解禁日を過ぎたものは「期限切れ」ではない。いま予約できる＝窓が開いている */
+    const closeAt = b.endIso ? `${b.endIso}${b.endAt ? ' ' + b.endAt : ''}` : null;
+    const when = b.state === '受付中'
+        ? `もう予約できます${b.iso ? `（${b.iso} ${b.at || ''} 解禁済み）` : ''}${closeAt ? `／${closeAt} で締切` : ''}`
+      : b.state === '締切' ? `${closeAt} で締切済み`
+      : b.mode === 'asap' ? '今すぐ（締切なし・待つほど損）'
       : b.mode === 'none' ? '予約制度なし → 単一障害点の確認へ'
       : b.mode === 'unknown' ? '解禁日は非公表 → 監視（②）で通知'
       : b.iso ? `${b.iso} ${b.at || ''}` : `基準日が未定（${b.offsetMonths ? `${-b.offsetMonths}ヶ月前` : `${-b.offsetDays}日前`}${b.at ? ' ' + b.at : ''}）`;
-    const cd = (b.state === '未' && b.days !== null) ? `<span class="cdn mono">あと${b.days}日</span>` : '';
+    const cd = (b.state === '未' && b.days !== null) ? `<span class="cdn mono">あと${b.days}日</span>`
+      : (b.state === '受付中' && b.endDays !== null) ? `<span class="cdn mono">締切まであと${b.endDays}日</span>` : '';
     const chk = (b.mode !== 'none') ? `<label style="font-size:11px;float:right"><input type="checkbox" class="bk-done" data-rule="${b.key}" ${b.done ? 'checked' : ''}> 済</label>` : '';
     const cx = !b.cancel ? '' :
       (b.cancel.refundable === false ? '<span class="bdg ng">取消不可</span>'
@@ -2072,7 +2168,7 @@ function exportImage() {
     });
   });
   lines.push({ t: '', s: 10 });
-  const F = S.solve().filter(f => f.lv === 'warn' || f.kind === 'adjacent');
+  const F = S.solve(todayIso()).filter(f => f.lv === 'warn' || f.kind === 'adjacent' || f.kind === 'openNow');
   if (F.length) lines.push({ t: '注意すること', s: 22, b: true, c: '#C0453B' });
   F.slice(0, 4).forEach(f => {
     lines.push({ t: '・' + f.ti, s: 18, c: '#12202E' });
@@ -2090,9 +2186,13 @@ function exportImage() {
       lines.push({ t: '・' + w.ti, s: 16, c: '#C0453B' }));
   }
   lines.push({ t: '', s: 10 });
-  const bks = S.bookings(todayIso()).filter(b => b.state === '未' || b.state === '監視中');
+  const bks = S.bookings(todayIso()).filter(b => b.state === '受付中' || b.state === '未' || b.state === '監視中');
   if (bks.length) lines.push({ t: 'これからの予約', s: 22, b: true, c: '#2E5FD9' });
   bks.slice(0, 5).forEach(b => {
+    if (b.state === '受付中') {
+      lines.push({ t: `・${b.label}  もう予約できます${b.endIso ? `（${b.endIso} ${b.endAt || ''} 締切・あと${b.endDays}日）` : ''}`, s: 18, c: '#2E5FD9' });
+      return;
+    }
     const when = b.iso ? `${b.iso} ${b.at || ''}` : (b.mode === 'unknown' ? '解禁日を監視中' : '日付未定');
     lines.push({ t: `・${b.label}  ${when}${b.days != null && b.days >= 0 ? `（あと${b.days}日）` : ''}`, s: 18, c: '#12202E' });
   });

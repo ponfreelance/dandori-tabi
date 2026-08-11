@@ -347,6 +347,69 @@ ok('watchOnly ルールは①に出ない（監視②専用）', () => {
   S.configure({ attractions, rules, layout, state });
 });
 
+// ── 解禁済みの窓（受付中）と締切 ──
+ok('スマートEX 1年前予約：乗車1年前5:30に開き、1ヶ月前7:30に閉じる', () => {
+  const r = rules.find(x => x.id === 'smartex1y');
+  assert.equal(r.anchor, 'train');
+  assert.equal(r.offsetMonths, -12);
+  assert.equal(r.at, '05:30');
+  assert.deepEqual(r.end, { offsetMonths: -1, offsetDays: 0, at: '07:30' });
+  assert.ok(r.caution.includes('座席を選べません'), '席を選べない代償を持つ');
+  assert.ok(r.verifiedAt && r.source, '公式の出典と検証日を持つ');
+});
+
+// 往復とも新幹線の旅行（11/15 行き・11/17 帰り）で窓の開閉を見る
+const trainTrip = S.emptyTrip();
+trainTrip.trip = { start: '2026-11-15', end: '2026-11-17', transports: [
+  { leg: 'outbound', mode: 'train', date: '2026-11-15' },
+  { leg: 'return', mode: 'train', date: '2026-11-17' },
+] };
+trainTrip.people = state.people;
+
+ok('解禁日を過ぎたものは「期限切れ」ではなく「受付中」', () => {
+  S.configure({ attractions, rules, layout, state: trainTrip });
+  const b = S.bookings('2026-08-11');            // 旅行は 11/15〜11/17
+  const y = b.filter(x => x.id === 'smartex1y');
+  assert.equal(y.length, 2, '往復ぶん出る');
+  assert.ok(y.every(x => x.state === '受付中'));
+  assert.equal(y[0].endIso, '2026-10-15');       // 乗車1ヶ月前
+  assert.equal(y[0].endAt, '07:30');
+  assert.equal(y[0].endDays, 65);
+  assert.equal(b.filter(x => x.state === '期限切れ').length, 0, '「期限切れ」は使わない');
+  assert.equal(b[0].state, '受付中', 'いま行動できるものを先頭に出す');
+  const jr = b.find(x => x.id === 'jr');
+  assert.equal(jr.state, '未', '通常発売はまだ先');
+});
+
+ok('窓が閉じたら「締切」（事前申込は発売開始日7:30まで）', () => {
+  const b = S.bookings('2026-10-16');            // 行きの乗車1ヶ月前(10/15)を過ぎた日
+  const out = b.filter(x => x.key.endsWith('@outbound'));
+  assert.equal(out.find(x => x.id === 'smartex1y').state, '締切');
+  assert.equal(out.find(x => x.id === 'smartex').state, '締切');
+  assert.equal(out.find(x => x.id === 'jr').state, '受付中', '通常発売は乗車日まで受付中');
+  const ret = b.filter(x => x.key.endsWith('@return'));
+  assert.equal(ret.find(x => x.id === 'smartex1y').state, '受付中', '帰り(11/17)の窓はまだ開いている');
+});
+
+ok('もう予約できるのに押さえていなければ Finding に出す', () => {
+  const f = S.solve('2026-08-11').filter(x => x.kind === 'openNow');
+  assert.equal(f.length, 1, '同じルールの往復は1件にまとめる');
+  assert.ok(f[0].ti.includes('もう予約できます'));
+  assert.ok(f[0].dt.includes('あと65日'), '窓が閉じるまでの日数を出す');
+  assert.ok(f[0].fix.includes('取り消せる'), '取消可否で行動が変わる');
+  assert.ok(f[0].fix.includes('座席を選べません'), '代償（caution）を併記する');
+  assert.equal(S.solve().filter(x => x.kind === 'openNow').length, 0, 'today 無しなら日付依存の検出は飛ばす');
+});
+
+ok('予約済みにすれば受付中から消える', () => {
+  trainTrip.booked = { 'smartex1y@outbound': true, 'smartex1y@return': true };
+  const b = S.bookings('2026-08-11');
+  assert.ok(b.filter(x => x.id === 'smartex1y').every(x => x.state === '済'));
+  assert.equal(S.solve('2026-08-11').filter(x => x.kind === 'openNow').length, 0);
+  trainTrip.booked = {};
+  S.configure({ attractions, rules, layout, state });
+});
+
 // ── F6. パーク内の回り順 ──
 S.configure({ attractions, rules, layout, state });
 

@@ -106,8 +106,10 @@
       a.short === n || a.id === n) || null;
   }
 
-  /* ── F2〜F5. 破綻検出 ── */
-  function solve() {
+  /* ── F2〜F5. 破綻検出 ──
+     today（ISO日付）を渡すと「もう予約できるのに押さえていない」も検出する（G）。
+     省略時は日付に依存する検出だけを飛ばす */
+  function solve(today) {
     const f = [];
     const kids = STATE.people.filter(p => !p.adult);
     const naps = STATE.constraints.filter(c => c.type === 'nap');
@@ -199,6 +201,35 @@
         ti: `取消不可：${nonRef.map(r => r.label).join('・')}は買うと戻せません`,
         dt: `${pendingLabels.join('、')}がまだ確定していません。先に取消不可のものを買うと、これらが取れなかったとき費用が戻りません。`,
         fix: '取り消せるもの（新幹線330円・宿の無料キャンセル枠など）から先に確定し、取消不可のものは依存が固まり次第すぐ買う。変動価格の値上がりとのトレードオフはあるが、順序だけは守る。',
+      });
+    }
+
+    /* G. ★もう予約できるのに押さえていない。
+       解禁日を過ぎた窓は「期限切れ」ではなく開いている。待つほど席は減り、
+       窓自体に閉じる時刻があるもの（事前申込・1年前予約）は、過ぎたら二度と使えない。
+       取消できるかで行動が変わるので、cancel を必ず添えて出す */
+    if (today) {
+      const byRule = {};
+      bookings(today).filter(b => b.state === '受付中')
+        .forEach(b => (byRule[b.id] = byRule[b.id] || []).push(b));
+      Object.values(byRule).forEach(bs => {
+        const near = bs.slice().sort((a, b) => (a.endDays ?? 9999) - (b.endDays ?? 9999))[0];
+        const r = bs[0];
+        const cx = r.cancel || {};
+        const act = cx.refundable === true
+          ? `取り消せる（${cx.note || '要確認'}）。取り消せるものから先に確定させる順序でよい。`
+          : cx.refundable === false
+            ? '取消不可。宿・便が確定してから買う（順序を守る）。'
+            : `取消規定を先に確認（${cx.note || '要確認'}）。`;
+        f.push({
+          lv: r.criticality === 'singlePoint' ? 'warn' : 'note',
+          kind: 'openNow', ruleId: r.id,
+          ti: `もう予約できます：${bs.map(b => b.label).join('・')}`,
+          dt: `${r.iso}${r.at ? ' ' + r.at : ''} に解禁済みで、いま受付中です。`
+            + (near.endIso ? `${near.endIso}${near.endAt ? ' ' + near.endAt : ''} で締切（あと${near.endDays}日）。` : '')
+            + (r.note || ''),
+          fix: act + (r.caution ? ` ※${r.caution}` : ''),
+        });
       });
     }
 
@@ -320,6 +351,16 @@
     return transportsDecided() ? [] : [{ date: null, leg: null }];
   }
 
+  /* ★offset* は「窓が開く日」であって締切ではない。解禁日を過ぎた＝もう予約できる（受付中）。
+     これを「期限切れ」と表示すると、いま押さえられるものを取り逃す。
+     窓が閉じる側は rule.end（省略時は anchor 当日＝乗車日・搭乗日・来園日）。
+     ※日付粒度で判定する（today は日付のみ）。開く/閉じる当日は時刻を併記して判断を委ねる */
+  function windowEnd(r, base) {
+    if (!base) return null;
+    const e = r.end || { offsetMonths: 0, offsetDays: 0, at: null };
+    return { when: shift(base, e.offsetMonths || 0, e.offsetDays || 0), at: e.at || null };
+  }
+
   function bookings(today) {
     const T = new Date(today + 'T00:00:00');
     const out = [];
@@ -330,26 +371,35 @@
         const needsDate = !(r.mode === 'asap' || r.mode === 'none');
         const when = (base && needsDate) ? shift(base, r.offsetMonths || 0, r.offsetDays || 0) : null;
         const days = when ? Math.round((when - T) / 86400000) : null;
+        const end = (r.mode === 'none' || r.mode === 'unknown') ? null : windowEnd(r, base);
+        const endDays = end ? Math.round((end.when - T) / 86400000) : null;
         const key = r.id + (tg.leg && targets.length > 1 ? '@' + tg.leg : '');
         const done = !!STATE.booked[key];
+        const open = days !== null && days < 0;                 // 解禁済み
+        const closed = endDays !== null && endDays < 0;         // 窓が閉じた
         const state =
           r.mode === 'none' ? '予約不可' :
           done ? '済' :
           (needsDate && !base) ? '未定' :
           r.mode === 'unknown' ? '監視中' :
-          (days !== null && days < 0) ? '期限切れ' : '未';
+          closed ? '締切' :
+          open ? '受付中' : '未';
         out.push({
           ...r, when, days, done, key,
           label: r.label + (tg.leg && targets.length > 1 ? `（${LEG_LABEL[tg.leg]}）` : ''),
           iso: when ? isoDate(when) : null,
+          endIso: end ? isoDate(end.when) : null, endAt: end ? end.at : null, endDays,
           state,
         });
       });
     });
     return out.sort((a, b) => {
-      const rank = x => x.state === '未' ? 0 : x.state === '監視中' ? 1 : x.state === '未定' ? 2 :
-                        x.state === '予約不可' ? 3 : x.state === '済' ? 4 : 5;
+      /* 受付中＝いま行動できる。いちばん上に置く（下に埋もれると取り逃す） */
+      const rank = x => x.state === '受付中' ? 0 : x.state === '未' ? 1 : x.state === '監視中' ? 2 :
+                        x.state === '未定' ? 3 : x.state === '予約不可' ? 4 : x.state === '済' ? 5 : 6;
       if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      /* 受付中どうしは「先に閉じる窓」が上 */
+      if (a.state === '受付中' && b.state === '受付中') return (a.endDays ?? 9999) - (b.endDays ?? 9999);
       return (a.days ?? 9999) - (b.days ?? 9999);
     });
   }
