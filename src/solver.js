@@ -450,8 +450,8 @@
     /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
     const pday = parkDay();
     if (ring().length && pday) {
-      const ph = STATE.parkHours || {};
-      if (!ph.open && !(STATE.tickets || []).some(t => t.date === pday && t.entryTime)) {
+      const ph = parkHoursFor(pday);
+      if (!ph.open && !dayInfo(pday).some(x => x.entryTime)) {
         u.push({ what: `パークの開園時刻（${pday}）`, why: '最初の区間に何件入るか計算できない' });
       }
       if (!ph.close && !LAYOUT.closeDefault && !parkLeave(pday)) {
@@ -546,10 +546,38 @@
   }
   const cantRide = a => STATE.people.filter(p => !p.adult && judge(p, a).s !== 'ok').map(p => p.name);
 
-  /* パーク日：時間指定を持つ券の日 > 券の日 > 旅行開始日 */
+  /* ★1.5デイ・2デイ券は「入場日」だけでは日が足りない。券名から使える日を展開する。
+     1.5デイ＝初日は入場時間から（例15:00）＋翌日は終日。2デイ＝2日とも終日。
+     パーサは触らない（控えに書いてあるのは入場日1つだけなので、ここで解釈する） */
+  function ticketDays(t) {
+    if (!t || !t.date) return [];
+    const m = NORM(t.name || '').match(/([0-9]+(?:\.[0-9]+)?)\s*デイ/);
+    const n = m ? Math.ceil(parseFloat(m[1])) : 1;
+    const out = [];
+    for (let i = 0; i < Math.max(1, Math.min(n, 5)); i++) {
+      out.push({
+        date: isoDate(shift(t.date, 0, i)),
+        /* 初日だけ入場時間が効く（1.5デイの午後入場）。2日目以降は開園から */
+        entryTime: i === 0 ? (t.entryTime || null) : null,
+        nth: i + 1, of: n, ticket: t.name,
+      });
+    }
+    return out;
+  }
+
+  /* パーク日：券から展開した日をすべて（1.5デイなら2日）。無ければ旅行開始日 */
   function parkDays() {
-    const d = (STATE.tickets || []).map(t => t.date).filter(Boolean);
+    const d = (STATE.tickets || []).flatMap(ticketDays).map(x => x.date);
     return [...new Set(d)].sort();
+  }
+  function dayInfo(day) {
+    return (STATE.tickets || []).flatMap(ticketDays).filter(x => x.date === day);
+  }
+  /* 開園・閉園は日ごとに違う（1.5デイの初日は午後から）。byDay があればそれが勝つ */
+  function parkHoursFor(day) {
+    const ph = STATE.parkHours || {};
+    const per = (ph.byDay && day && ph.byDay[day]) || {};
+    return { open: per.open || ph.open || null, close: per.close || ph.close || null, waitMin: ph.waitMin };
   }
   function parkDay() {
     const fixed = (STATE.tickets || [])
@@ -583,7 +611,7 @@
     opts = opts || {};
     if (!ring().length) return null;
     const day = opts.day || parkDay();
-    const ph = STATE.parkHours || {};
+    const ph = parkHoursFor(day);
     const wait = num(opts.waitMin, num(ph.waitMin, num(LAYOUT.assumeWaitMin, DEFAULT_WAIT)));
     const entrance = LAYOUT.entrance || ring()[0].area;
     const warns = [];
@@ -642,7 +670,7 @@
     blocks.sort((a, b) => a.start - b.start || a.end - b.end);
 
     /* 開園・閉園。閉園は「帰りの便からの退園締切」があればそちらが勝つ（早いほうが締切） */
-    const entry = (STATE.tickets || []).find(t => t.date === day && t.entryTime);
+    const entry = dayInfo(day).find(x => x.entryTime);
     const open = ph.open || (entry && entry.entryTime) || LAYOUT.openDefault || null;
     const leave = parkLeave(day);
     const manualClose = ph.close || LAYOUT.closeDefault || null;
@@ -659,8 +687,20 @@
       .filter(c => c.type === 'want').flatMap(c => c.rides || []));
     const wants = [...wantIds].map(id => ATTRACTIONS.find(a => a.id === id)).filter(Boolean);
 
+    /* ★その日のパーク時間の外にある固定点は落とす。
+       1.5デイの初日は15:00入園なので、13:30の昼寝は「入園前」＝パークを出た話ではない */
+    const openMin = open ? toMin(open) : null;
+    const closeMin = close ? toMin(close) : null;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (openMin != null && b.end <= openMin) { blocks.splice(i, 1); continue; }
+      if (closeMin != null && b.start >= closeMin) { blocks.splice(i, 1); continue; }
+      b.preEntry = openMin != null && b.start < openMin;   // 開園をまたぐ＝入園前から続いている
+    }
+
     const steps = [];
-    const used = new Set();
+    /* 前の日に回るぶんは候補から外す（1.5デイ等で2日に分けるとき、同じものを二重に数えない） */
+    const used = new Set(opts.exclude ? [...opts.exclude] : []);
     blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
 
     let pos = entrance;
@@ -738,7 +778,7 @@
             ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
-        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where });
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where, preEntry: b.preEntry });
       }
       cur = Math.max(cur == null ? b.end : cur, b.end);
     });
@@ -801,6 +841,9 @@
       return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'unreachable', insert: ins };
     });
 
+    /* 複数日をまとめて組むとき（plan）は、希望の警告は日ごとに出さず最後に1回だけ出す */
+    if (opts.wantWarns !== false) wantWarnings();
+    function wantWarnings() {
     wantStatus.filter(w => w.state === 'cantRide').forEach(w => warns.push({
       lv: 'warn', kind: 'wantCantRide', ti: `行きたい ${w.short} は誰も乗れません`,
       dt: `${w.name}（${w.area}）は、いまの身長だと家族の誰も条件を満たしません。`,
@@ -825,6 +868,7 @@
       ti: `${s.at}–${s.until} は行きたい${s.wantN}件のうち${s.capacity}件しか入りません`,
       dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
       fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
+    }
 
     /* ★パークを出て休むなら、戻れるかを先に出す。
        USJは年間パス以外は再入場できない＝昼寝でホテルへ帰ると、その日はそこで終わり。
@@ -832,22 +876,26 @@
     const reenter = canReenter();
     if (reenter === false) {
       steps.forEach((s, i) => {
-        if (s.kind !== 'nap' || s.where === 'inpark') return;
+        /* 入園前から続いている休憩は「出た」話ではないので対象外 */
+        if (s.kind !== 'nap' || s.where === 'inpark' || s.preEntry) return;
+        /* 判断材料は「出たあとにパーク時間がどれだけ残るか」。
+           やることが残っているかではなく、買った時間を捨てることになるかで見る */
+        const rest = (closeMin != null && s.until) ? closeMin - toMin(s.until) : null;
         const after = steps.slice(i + 1).filter(x =>
           x.kind === 'fixed' || (x.kind === 'move' && x.items.length));
-        if (!after.length) {
+        if (rest == null || rest <= 0) {
           if (s.where === 'out') warns.push({ lv: 'note', kind: 'reentryLast',
             ti: `${s.at} にパークを出ると、その日はそこで終わりです`,
             dt: `${s.label || '休憩'}でパークを出ると、いまの券では戻れません（再入場は年間パスのみ）。`,
             fix: '出る前に、その日にやることを終わらせておく。' });
           return;
         }
-        const last = after[after.length - 1];
         warns.push({ lv: 'warn', kind: 'reentry',
           ti: `${s.at}–${s.until} にパークを出ると戻れません`,
-          dt: `${s.label || '休憩'}のあとに ${after.length}件の予定（${last.kind === 'fixed' ? last.at + 'の時間指定' : last.at + '–' + last.until + 'の区間'}まで）が残っています。`
-            + `いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
-          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして以降の予定を捨てる。'
+          dt: `${s.label || '休憩'}のあと、パークは${close}まで（残り${Math.floor(rest / 60)}時間${rest % 60 ? (rest % 60) + '分' : ''}）あります`
+            + (after.length ? `。予定も${after.length}件残っています` : '（回る先は残っていません）')
+            + `。いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
+          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして残り時間を捨てる。'
             + ((LAYOUT.reentry && LAYOUT.reentry.exceptions || []).length ? ` 例外：${LAYOUT.reentry.exceptions.join('／')}。` : '') });
       });
     }
@@ -937,9 +985,73 @@
       approx: !LAYOUT.verifiedAt };
   }
 
+  /* ── F6b. 複数日をまとめて組む（1.5デイ・2デイ券）──
+     日ごとに course() を回し、前の日に回るぶんを次の日から差し引く。
+     希望（行きたい）は日をまたいで1回だけ判定する＝「初日に入らなくても2日目に入るならOK」 */
+  const WANT_RANK = { fixed: 0, planned: 1, tight: 2, dropped: 3, unreachable: 4, cantRide: 5 };
+
+  function plan(opts) {
+    opts = opts || {};
+    if (!ring().length) return null;
+    const days = parkDays();
+    if (!days.length) {
+      const only = course(opts);
+      return only ? { days: [only], wants: only.wants, warns: [], multi: false } : null;
+    }
+    const out = [];
+    /* どの日であれ時間指定で乗るものは、他の日の候補に出さない（二重に数えない） */
+    const done = new Set();
+    (STATE.tickets || []).forEach(t => (t.fixed || t.slots || []).forEach(s => {
+      const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+      if (a) done.add(a.id);
+    }));
+    days.forEach((d, i) => {
+      const c = course({ day: d, waitMin: opts.waitMin, exclude: done, wantWarns: false });
+      if (!c) return;
+      c.nth = i + 1;
+      c.of = days.length;
+      c.info = dayInfo(d);
+      /* 「入る件数」までを回るぶんとして次の日から外す。入らなかったものは翌日へ残す */
+      c.steps.forEach(s => {
+        if (s.kind === 'fixed') s.items.forEach(x => { if (x.ride) done.add(x.ride); });
+        if (s.kind === 'move') s.items.slice(0, s.capacity == null ? s.items.length : s.capacity)
+          .forEach(x => done.add(x.id));
+      });
+      out.push(c);
+    });
+    if (!out.length) return null;
+
+    /* 希望：日をまたいでいちばん良い結果を採る */
+    const byId = {};
+    out.forEach(c => c.wants.forEach(w => {
+      const cur = byId[w.id];
+      if (!cur || WANT_RANK[w.state] < WANT_RANK[cur.state]) byId[w.id] = { ...w, day: c.day, nth: c.nth };
+    }));
+    const wants = Object.values(byId);
+    const warns = [];
+    const okw = wants.filter(w => w.state === 'fixed' || w.state === 'planned');
+    if (wants.length) {
+      const perDay = out.map(c => `${c.nth}日目 ${wants.filter(w => w.nth === c.nth && (w.state === 'fixed' || w.state === 'planned')).length}件`);
+      warns.push({ lv: okw.length === wants.length ? 'good' : 'note', kind: 'wantSummary',
+        ti: `行きたい${wants.length}件のうち、入るのは${okw.length}件`,
+        dt: `${perDay.join('／')}。${okw.length < wants.length ? `残り${wants.length - okw.length}件は入りません。` : '全部入ります。'}`,
+        fix: okw.length < wants.length ? '下の理由を見て、捨てるか・日を入れ替えるか・時間指定を取り直すかを決める。' : '' });
+    }
+    wants.filter(w => w.state !== 'fixed' && w.state !== 'planned').forEach(w => {
+      const from = out.find(c => c.nth === w.nth);
+      const src = (from && from.warns.filter(x => x.kind && x.kind.indexOf('want') === 0)) || [];
+      const hit = src.find(x => x.ti.indexOf(w.short) >= 0);
+      warns.push(hit ? { ...hit, ti: `${w.nth}日目：${hit.ti}` } : {
+        lv: 'warn', kind: 'wantMiss', ti: `行きたい ${w.short} は2日とも入りません`,
+        dt: `${w.name}（${w.area}）は、どの日の区間にも収まりません。`, fix: '捨てるか、券を足す。' });
+    });
+    return { days: out, wants, warns, multi: days.length > 1 };
+  }
+
   g.DandoriSolver = {
     EDGE_CM, configure, emptyState, emptyTrip, migrateState, judge, effectiveMin, verdictCounts, matchAttraction,
     solve, derive, bookings, overlaps, undecided, shift, isoDate, toMin, toStr,
-    course, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
+    course, plan, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
+    ticketDays, dayInfo, parkHoursFor, canReenter,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

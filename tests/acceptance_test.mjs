@@ -536,6 +536,111 @@ ok('時間の余りで一周するのは「往復のムダ」に数えない', (
   S.configure({ attractions, rules, layout, state });
 });
 
+// ── 1.5デイ券：2日に分ける ──
+const halfDayTrip = () => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.tickets = [
+    { name: '1.5デイ・スタジオ・パス 大人', date: '2026-11-15', entryTime: '15:00', fixed: [], free: [] },
+    { name: 'ユニバーサル・エクスプレス・パス 5', date: '2026-11-16', free: [], fixed: [
+      { at: '11:30', until: '13:30', name: 'スーパー・ニンテンドー・ワールド', reentry: false },
+      { at: '11:30', until: '12:00', name: 'マリオカート ～クッパの挑戦状～' },
+    ] },
+  ];
+  t.parkHours = { open: null, close: null, waitMin: null, byDay: {
+    '2026-11-15': { open: null, close: '21:00' },
+    '2026-11-16': { open: '09:00', close: '20:00' },
+  } };
+  t.constraints = [];
+  return t;
+};
+
+ok('1.5デイ券は「入場日＋翌日」の2日に展開される', () => {
+  const t = halfDayTrip();
+  S.configure({ attractions, rules, layout, state: t });
+  assert.deepEqual(S.parkDays(), ['2026-11-15', '2026-11-16']);
+  const d = S.ticketDays(t.tickets[0]);
+  assert.equal(d.length, 2);
+  assert.equal(d[0].entryTime, '15:00', '初日は午後入場');
+  assert.equal(d[1].entryTime, null, '2日目は開園から');
+  assert.equal(d[1].date, '2026-11-16');
+  assert.equal(S.ticketDays(t.tickets[1]).length, 1, 'エクスプレス券は1日');
+  assert.equal(S.ticketDays({ name: '2デイ・スタジオ・パス', date: '2026-11-15' }).length, 2);
+});
+
+ok('plan は日ごとにルートを出し、初日の入場時間から始める', () => {
+  S.configure({ attractions, rules, layout, state: halfDayTrip() });
+  const p = S.plan();
+  assert.equal(p.multi, true);
+  assert.equal(p.days.length, 2);
+  assert.equal(p.days[0].day, '2026-11-15');
+  assert.equal(p.days[0].open, '15:00', '券の入場時間が初日の開園になる');
+  assert.equal(p.days[0].close, '21:00');
+  assert.equal(p.days[1].open, '09:00', '2日目は終日');
+  assert.equal(p.days[0].nth, 1);
+  assert.equal(p.days[1].of, 2);
+});
+
+ok('前の日に回るぶんは翌日の候補から外す（二重に数えない）', () => {
+  S.configure({ attractions, rules, layout, state: halfDayTrip() });
+  const p = S.plan();
+  const idsOf = c => c.steps.filter(s => s.kind === 'move').flatMap(s => s.items.map(i => i.id));
+  /* 「入る件数」までが回るぶん。そこに入ったものは翌日に出さない。
+     入らなかったぶん（候補の余り）は翌日へ残す＝それが2日に分ける意味 */
+  const planned = p.days[0].steps.filter(s => s.kind === 'move')
+    .flatMap(s => s.items.slice(0, s.capacity == null ? s.items.length : s.capacity).map(i => i.id));
+  const d2 = idsOf(p.days[1]);
+  assert.ok(planned.length, '初日に回るぶんが出る');
+  assert.equal(planned.filter(x => d2.includes(x)).length, 0, '初日に回るぶんは翌日に出さない');
+  const leftover = idsOf(p.days[0]).filter(x => !planned.includes(x));
+  assert.ok(leftover.length && leftover.every(x => d2.includes(x)), '初日に入らなかったぶんは翌日へ残る');
+  // 2日目の時間指定で乗るものは、初日の候補にも出さない
+  assert.ok(!idsOf(p.days[0]).includes('kart'), '翌日の時間指定ぶんは初日の候補から外す');
+  assert.ok(p.days[1].steps.some(s => s.kind === 'fixed' && s.items.some(i => i.ride === 'kart')));
+});
+
+ok('希望は日をまたいで1回だけ判定する（初日に入らなくても2日目で入ればOK）', () => {
+  const t = halfDayTrip();
+  t.constraints = [{ type: 'want', rides: ['kart', 'jaws', 'donk'] }];
+  S.configure({ attractions, rules, layout, state: t });
+  const p = S.plan();
+  assert.equal(p.wants.length, 3, '重複せず3件');
+  assert.equal(p.wants.find(w => w.id === 'kart').state, 'fixed');
+  assert.equal(p.wants.find(w => w.id === 'kart').nth, 2, '2日目の枠で確保');
+  const sum = p.warns.find(w => w.kind === 'wantSummary');
+  assert.ok(sum && sum.ti.includes('行きたい3件のうち'));
+  assert.ok(sum.dt.includes('1日目') && sum.dt.includes('2日目'), '日ごとの内訳を出す');
+});
+
+ok('入園前に終わる昼寝は、その日の「出ると戻れない」に数えない', () => {
+  const t = halfDayTrip();
+  t.constraints = [{ type: 'nap', who: 'p5', from: '13:30', to: '15:30', where: 'out', label: '第3子(1歳)の昼寝' }];
+  S.configure({ attractions, rules, layout, state: t });
+  const p = S.plan();
+  const nap1 = p.days[0].steps.find(s => s.kind === 'nap');
+  assert.ok(nap1.preEntry, '15:00入園なら13:30の昼寝は入園前');
+  assert.equal(p.days[0].warns.filter(w => w.kind === 'reentry').length, 0, '入園前は再入場の話ではない');
+  assert.equal(p.days[1].warns.filter(w => w.kind === 'reentry').length, 1, '2日目（9:00入園）は正しく警告する');
+  // 閉園後・開園前に完全に外れる固定点は落とす
+  const t2 = halfDayTrip();
+  t2.constraints = [{ type: 'nap', who: 'p5', from: '08:00', to: '10:00', where: 'out', label: '朝寝' }];
+  t2.parkHours.byDay['2026-11-15'] = { open: '15:00', close: '21:00' };
+  S.configure({ attractions, rules, layout, state: t2 });
+  assert.equal(S.plan().days[0].steps.filter(s => s.kind === 'nap').length, 0, '初日のパーク時間外なので出さない');
+});
+
+ok('初日の午後だけでは入らないぶんが2日目に回る', () => {
+  const t = halfDayTrip();
+  t.parkHours.byDay['2026-11-15'] = { open: null, close: '17:00' };   // 15:00–17:00 の2時間
+  S.configure({ attractions, rules, layout, state: t });
+  const p = S.plan();
+  const first = p.days[0].steps.find(s => s.kind === 'move');
+  assert.ok(first.capacity <= 2, '2時間なら入るのは1〜2件');
+  assert.ok(first.items.length > first.capacity, '候補のほうが多い＝捨てる判断が要る');
+  const d2 = p.days[1].steps.filter(s => s.kind === 'move').flatMap(s => s.items.map(i => i.id));
+  assert.ok(d2.length, '入らなかったぶんは2日目の候補に残る');
+});
+
 // ── パークの再入場（券種の話。エリア整理券の「再入場不可」とは別物） ──
 const napTrip = (where, ticketName) => {
   const t = S.emptyTrip();
@@ -562,7 +667,8 @@ ok('スタジオ・パスで昼寝に出ると「戻れません」', () => {
   const w = c.warns.find(x => x.kind === 'reentry');
   assert.ok(w, '警告を出す');
   assert.ok(w.ti.includes('戻れません'));
-  assert.ok(w.dt.includes('件の予定'), '昼寝の後に何が残るかを言う');
+  assert.ok(/残り\d+時間/.test(w.dt), '出たあとに捨てることになる時間を言う');
+  assert.ok(w.dt.includes('件') || w.dt.includes('回る先'), '残る予定にも触れる');
   assert.ok(w.fix.includes('パーク内で休む'), '代替を出す');
   assert.ok(w.fix.includes('年間パス'), '例外も併記する');
 });

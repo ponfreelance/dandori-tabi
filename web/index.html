@@ -163,6 +163,12 @@
   .wst{display:flex;gap:7px;align-items:baseline;font-size:11.5px;padding:3px 0}
   .wst .s{font-weight:700;width:76px;flex:none;font-size:11px}
   .wst .s.ok{color:var(--pass)} .wst .s.tight{color:var(--edge)} .wst .s.ng{color:var(--block)}
+  .dayhd{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0 6px;
+    padding:7px 11px;background:var(--measure);color:#fff;border-radius:8px}
+  .dayhd .n{font-weight:700;font-size:13px}
+  .dayhd .d{font-family:Consolas,monospace;font-size:12px;opacity:.9}
+  .dayhd .t{margin-left:auto;display:flex;gap:5px;align-items:center;font-size:11px}
+  .dayhd input[type=time]{padding:2px 5px;font-size:11.5px}
   .avoid{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:12px;background:var(--soft)}
   .avoid .ah{font-size:12px;font-weight:600;margin-bottom:6px}
   .avoid .ar{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
@@ -292,10 +298,8 @@
   <div class="blk">
     <div class="bh"><span class="no">04</span><h2>パーク内の回り順</h2><span class="hint" id="c-day"></span></div>
     <div class="row">
-      <label class="f">パーク日<select id="c-daysel"></select></label>
-      <label class="f">開園<input type="time" id="c-open"></label>
-      <label class="f">閉園<input type="time" id="c-close"></label>
       <label class="f">1件あたりの待ち（仮定・分）<input type="number" id="c-wait" min="5" max="180" step="5"></label>
+      <span class="note-sm" id="c-days" style="margin-top:0"></span>
     </div>
     <div id="want"></div>
     <div id="avoid"></div>
@@ -1399,8 +1403,8 @@ window.DANDORI_DATA = {
     /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
     const pday = parkDay();
     if (ring().length && pday) {
-      const ph = STATE.parkHours || {};
-      if (!ph.open && !(STATE.tickets || []).some(t => t.date === pday && t.entryTime)) {
+      const ph = parkHoursFor(pday);
+      if (!ph.open && !dayInfo(pday).some(x => x.entryTime)) {
         u.push({ what: `パークの開園時刻（${pday}）`, why: '最初の区間に何件入るか計算できない' });
       }
       if (!ph.close && !LAYOUT.closeDefault && !parkLeave(pday)) {
@@ -1495,10 +1499,38 @@ window.DANDORI_DATA = {
   }
   const cantRide = a => STATE.people.filter(p => !p.adult && judge(p, a).s !== 'ok').map(p => p.name);
 
-  /* パーク日：時間指定を持つ券の日 > 券の日 > 旅行開始日 */
+  /* ★1.5デイ・2デイ券は「入場日」だけでは日が足りない。券名から使える日を展開する。
+     1.5デイ＝初日は入場時間から（例15:00）＋翌日は終日。2デイ＝2日とも終日。
+     パーサは触らない（控えに書いてあるのは入場日1つだけなので、ここで解釈する） */
+  function ticketDays(t) {
+    if (!t || !t.date) return [];
+    const m = NORM(t.name || '').match(/([0-9]+(?:\.[0-9]+)?)\s*デイ/);
+    const n = m ? Math.ceil(parseFloat(m[1])) : 1;
+    const out = [];
+    for (let i = 0; i < Math.max(1, Math.min(n, 5)); i++) {
+      out.push({
+        date: isoDate(shift(t.date, 0, i)),
+        /* 初日だけ入場時間が効く（1.5デイの午後入場）。2日目以降は開園から */
+        entryTime: i === 0 ? (t.entryTime || null) : null,
+        nth: i + 1, of: n, ticket: t.name,
+      });
+    }
+    return out;
+  }
+
+  /* パーク日：券から展開した日をすべて（1.5デイなら2日）。無ければ旅行開始日 */
   function parkDays() {
-    const d = (STATE.tickets || []).map(t => t.date).filter(Boolean);
+    const d = (STATE.tickets || []).flatMap(ticketDays).map(x => x.date);
     return [...new Set(d)].sort();
+  }
+  function dayInfo(day) {
+    return (STATE.tickets || []).flatMap(ticketDays).filter(x => x.date === day);
+  }
+  /* 開園・閉園は日ごとに違う（1.5デイの初日は午後から）。byDay があればそれが勝つ */
+  function parkHoursFor(day) {
+    const ph = STATE.parkHours || {};
+    const per = (ph.byDay && day && ph.byDay[day]) || {};
+    return { open: per.open || ph.open || null, close: per.close || ph.close || null, waitMin: ph.waitMin };
   }
   function parkDay() {
     const fixed = (STATE.tickets || [])
@@ -1532,7 +1564,7 @@ window.DANDORI_DATA = {
     opts = opts || {};
     if (!ring().length) return null;
     const day = opts.day || parkDay();
-    const ph = STATE.parkHours || {};
+    const ph = parkHoursFor(day);
     const wait = num(opts.waitMin, num(ph.waitMin, num(LAYOUT.assumeWaitMin, DEFAULT_WAIT)));
     const entrance = LAYOUT.entrance || ring()[0].area;
     const warns = [];
@@ -1591,7 +1623,7 @@ window.DANDORI_DATA = {
     blocks.sort((a, b) => a.start - b.start || a.end - b.end);
 
     /* 開園・閉園。閉園は「帰りの便からの退園締切」があればそちらが勝つ（早いほうが締切） */
-    const entry = (STATE.tickets || []).find(t => t.date === day && t.entryTime);
+    const entry = dayInfo(day).find(x => x.entryTime);
     const open = ph.open || (entry && entry.entryTime) || LAYOUT.openDefault || null;
     const leave = parkLeave(day);
     const manualClose = ph.close || LAYOUT.closeDefault || null;
@@ -1608,8 +1640,20 @@ window.DANDORI_DATA = {
       .filter(c => c.type === 'want').flatMap(c => c.rides || []));
     const wants = [...wantIds].map(id => ATTRACTIONS.find(a => a.id === id)).filter(Boolean);
 
+    /* ★その日のパーク時間の外にある固定点は落とす。
+       1.5デイの初日は15:00入園なので、13:30の昼寝は「入園前」＝パークを出た話ではない */
+    const openMin = open ? toMin(open) : null;
+    const closeMin = close ? toMin(close) : null;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (openMin != null && b.end <= openMin) { blocks.splice(i, 1); continue; }
+      if (closeMin != null && b.start >= closeMin) { blocks.splice(i, 1); continue; }
+      b.preEntry = openMin != null && b.start < openMin;   // 開園をまたぐ＝入園前から続いている
+    }
+
     const steps = [];
-    const used = new Set();
+    /* 前の日に回るぶんは候補から外す（1.5デイ等で2日に分けるとき、同じものを二重に数えない） */
+    const used = new Set(opts.exclude ? [...opts.exclude] : []);
     blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
 
     let pos = entrance;
@@ -1687,7 +1731,7 @@ window.DANDORI_DATA = {
             ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
-        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where });
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where, preEntry: b.preEntry });
       }
       cur = Math.max(cur == null ? b.end : cur, b.end);
     });
@@ -1750,6 +1794,9 @@ window.DANDORI_DATA = {
       return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'unreachable', insert: ins };
     });
 
+    /* 複数日をまとめて組むとき（plan）は、希望の警告は日ごとに出さず最後に1回だけ出す */
+    if (opts.wantWarns !== false) wantWarnings();
+    function wantWarnings() {
     wantStatus.filter(w => w.state === 'cantRide').forEach(w => warns.push({
       lv: 'warn', kind: 'wantCantRide', ti: `行きたい ${w.short} は誰も乗れません`,
       dt: `${w.name}（${w.area}）は、いまの身長だと家族の誰も条件を満たしません。`,
@@ -1774,6 +1821,7 @@ window.DANDORI_DATA = {
       ti: `${s.at}–${s.until} は行きたい${s.wantN}件のうち${s.capacity}件しか入りません`,
       dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
       fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
+    }
 
     /* ★パークを出て休むなら、戻れるかを先に出す。
        USJは年間パス以外は再入場できない＝昼寝でホテルへ帰ると、その日はそこで終わり。
@@ -1781,22 +1829,26 @@ window.DANDORI_DATA = {
     const reenter = canReenter();
     if (reenter === false) {
       steps.forEach((s, i) => {
-        if (s.kind !== 'nap' || s.where === 'inpark') return;
+        /* 入園前から続いている休憩は「出た」話ではないので対象外 */
+        if (s.kind !== 'nap' || s.where === 'inpark' || s.preEntry) return;
+        /* 判断材料は「出たあとにパーク時間がどれだけ残るか」。
+           やることが残っているかではなく、買った時間を捨てることになるかで見る */
+        const rest = (closeMin != null && s.until) ? closeMin - toMin(s.until) : null;
         const after = steps.slice(i + 1).filter(x =>
           x.kind === 'fixed' || (x.kind === 'move' && x.items.length));
-        if (!after.length) {
+        if (rest == null || rest <= 0) {
           if (s.where === 'out') warns.push({ lv: 'note', kind: 'reentryLast',
             ti: `${s.at} にパークを出ると、その日はそこで終わりです`,
             dt: `${s.label || '休憩'}でパークを出ると、いまの券では戻れません（再入場は年間パスのみ）。`,
             fix: '出る前に、その日にやることを終わらせておく。' });
           return;
         }
-        const last = after[after.length - 1];
         warns.push({ lv: 'warn', kind: 'reentry',
           ti: `${s.at}–${s.until} にパークを出ると戻れません`,
-          dt: `${s.label || '休憩'}のあとに ${after.length}件の予定（${last.kind === 'fixed' ? last.at + 'の時間指定' : last.at + '–' + last.until + 'の区間'}まで）が残っています。`
-            + `いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
-          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして以降の予定を捨てる。'
+          dt: `${s.label || '休憩'}のあと、パークは${close}まで（残り${Math.floor(rest / 60)}時間${rest % 60 ? (rest % 60) + '分' : ''}）あります`
+            + (after.length ? `。予定も${after.length}件残っています` : '（回る先は残っていません）')
+            + `。いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
+          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして残り時間を捨てる。'
             + ((LAYOUT.reentry && LAYOUT.reentry.exceptions || []).length ? ` 例外：${LAYOUT.reentry.exceptions.join('／')}。` : '') });
       });
     }
@@ -1886,10 +1938,74 @@ window.DANDORI_DATA = {
       approx: !LAYOUT.verifiedAt };
   }
 
+  /* ── F6b. 複数日をまとめて組む（1.5デイ・2デイ券）──
+     日ごとに course() を回し、前の日に回るぶんを次の日から差し引く。
+     希望（行きたい）は日をまたいで1回だけ判定する＝「初日に入らなくても2日目に入るならOK」 */
+  const WANT_RANK = { fixed: 0, planned: 1, tight: 2, dropped: 3, unreachable: 4, cantRide: 5 };
+
+  function plan(opts) {
+    opts = opts || {};
+    if (!ring().length) return null;
+    const days = parkDays();
+    if (!days.length) {
+      const only = course(opts);
+      return only ? { days: [only], wants: only.wants, warns: [], multi: false } : null;
+    }
+    const out = [];
+    /* どの日であれ時間指定で乗るものは、他の日の候補に出さない（二重に数えない） */
+    const done = new Set();
+    (STATE.tickets || []).forEach(t => (t.fixed || t.slots || []).forEach(s => {
+      const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+      if (a) done.add(a.id);
+    }));
+    days.forEach((d, i) => {
+      const c = course({ day: d, waitMin: opts.waitMin, exclude: done, wantWarns: false });
+      if (!c) return;
+      c.nth = i + 1;
+      c.of = days.length;
+      c.info = dayInfo(d);
+      /* 「入る件数」までを回るぶんとして次の日から外す。入らなかったものは翌日へ残す */
+      c.steps.forEach(s => {
+        if (s.kind === 'fixed') s.items.forEach(x => { if (x.ride) done.add(x.ride); });
+        if (s.kind === 'move') s.items.slice(0, s.capacity == null ? s.items.length : s.capacity)
+          .forEach(x => done.add(x.id));
+      });
+      out.push(c);
+    });
+    if (!out.length) return null;
+
+    /* 希望：日をまたいでいちばん良い結果を採る */
+    const byId = {};
+    out.forEach(c => c.wants.forEach(w => {
+      const cur = byId[w.id];
+      if (!cur || WANT_RANK[w.state] < WANT_RANK[cur.state]) byId[w.id] = { ...w, day: c.day, nth: c.nth };
+    }));
+    const wants = Object.values(byId);
+    const warns = [];
+    const okw = wants.filter(w => w.state === 'fixed' || w.state === 'planned');
+    if (wants.length) {
+      const perDay = out.map(c => `${c.nth}日目 ${wants.filter(w => w.nth === c.nth && (w.state === 'fixed' || w.state === 'planned')).length}件`);
+      warns.push({ lv: okw.length === wants.length ? 'good' : 'note', kind: 'wantSummary',
+        ti: `行きたい${wants.length}件のうち、入るのは${okw.length}件`,
+        dt: `${perDay.join('／')}。${okw.length < wants.length ? `残り${wants.length - okw.length}件は入りません。` : '全部入ります。'}`,
+        fix: okw.length < wants.length ? '下の理由を見て、捨てるか・日を入れ替えるか・時間指定を取り直すかを決める。' : '' });
+    }
+    wants.filter(w => w.state !== 'fixed' && w.state !== 'planned').forEach(w => {
+      const from = out.find(c => c.nth === w.nth);
+      const src = (from && from.warns.filter(x => x.kind && x.kind.indexOf('want') === 0)) || [];
+      const hit = src.find(x => x.ti.indexOf(w.short) >= 0);
+      warns.push(hit ? { ...hit, ti: `${w.nth}日目：${hit.ti}` } : {
+        lv: 'warn', kind: 'wantMiss', ti: `行きたい ${w.short} は2日とも入りません`,
+        dt: `${w.name}（${w.area}）は、どの日の区間にも収まりません。`, fix: '捨てるか、券を足す。' });
+    });
+    return { days: out, wants, warns, multi: days.length > 1 };
+  }
+
   g.DandoriSolver = {
     EDGE_CM, configure, emptyState, emptyTrip, migrateState, judge, effectiveMin, verdictCounts, matchAttraction,
     solve, derive, bookings, overlaps, undecided, shift, isoDate, toMin, toStr,
-    course, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
+    course, plan, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
+    ticketDays, dayInfo, parkHoursFor, canReenter,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
 
@@ -1917,7 +2033,6 @@ const DEFAULT_LEGS = [
 let FILE = S.emptyState();
 let ST = FILE.trips[0];   // アクティブ旅行への参照。ST への変更はそのまま FILE に反映される
 let selectedKid = null;
-let courseDay = null;     // 回り順を見る日（未選択なら solver が券から決める。保存しない）
 
 function syncActive() {
   ST = FILE.trips.find(t => t.id === FILE.activeTrip) || FILE.trips[0];
@@ -2033,6 +2148,11 @@ function loadSample() {
     source: 'paste', status: '確定',
   };
   ST.tickets = [{
+    /* 1.5デイ＝初日15:00から＋翌日は終日。パーク日は2日に展開される */
+    name: '1.5デイ・スタジオ・パス 大人',
+    date: '2026-11-15', entryTime: '15:00', no: 'P:9012.0.261003.00811',
+    fixed: [], free: [], price: null, source: 'paste', status: '確定',
+  }, {
     name: 'ユニバーサル・エクスプレス・パス 5 ~アドベンチャースペシャル~',
     date: '2026-11-16', entryTime: null, no: 'P:9012.0.261003.00812',
     fixed: [
@@ -2049,7 +2169,11 @@ function loadSample() {
     checkIn: '2026-11-15', checkOut: '2026-11-17', adults: 2, children: 3, rooms: 1,
     meals: { breakfast: true, dinner: false }, price: null, source: 'paste', status: '確定',
   };
-  ST.parkHours = { open: '09:00', close: '20:00', waitMin: null };   // 当日の開園・閉園（加工値）
+  /* 開園・閉園は日ごと（1.5デイの初日は券の入場時間15:00から）。いずれも加工値 */
+  ST.parkHours = { open: null, close: null, waitMin: null, byDay: {
+    '2026-11-15': { open: null, close: '21:00' },
+    '2026-11-16': { open: '09:00', close: '20:00' },
+  } };
   ST.booked = { jal: true, hotel: true, parkpass: true, express: true };
   save(); render();
 }
@@ -2127,10 +2251,10 @@ function renderTabs() {
       if (!confirm(`「${ST.name}」を削除しますか？（元に戻せません）`)) return;
       FILE.trips = FILE.trips.filter(t => t.id !== ST.id);
       FILE.activeTrip = FILE.trips[0].id;
-      syncActive(); selectedKid = null; courseDay = null; save(); render(); return;
+      syncActive(); selectedKid = null; save(); render(); return;
     }
     FILE.activeTrip = el.dataset.id;
-    syncActive(); selectedKid = null; courseDay = null; save(); render();
+    syncActive(); selectedKid = null; save(); render();
   }));
   $('tab-add').addEventListener('click', () => {
     const id = 't' + (Math.max(0, ...FILE.trips.map(t => +String(t.id).replace(/\D/g, '') || 0)) + 1);
@@ -2140,7 +2264,7 @@ function renderTabs() {
     }
     FILE.trips.push(nt);
     FILE.activeTrip = id;
-    syncActive(); selectedKid = null; courseDay = null; save(); render();
+    syncActive(); selectedKid = null; save(); render();
   });
 }
 
@@ -2273,7 +2397,14 @@ const RIDE_MARK = { all: '○', some: '△', switch: '◇' };
 
 function parkHours() {
   if (!ST.parkHours) ST.parkHours = { open: null, close: null, waitMin: null };  // 旧 trip.json 対策
+  if (!ST.parkHours.byDay) ST.parkHours.byDay = {};   // 1.5デイ等で日ごとに開園・閉園が違う
   return ST.parkHours;
+}
+function setDayHours(day, key, value) {
+  const ph = parkHours();
+  ph.byDay[day] = ph.byDay[day] || { open: null, close: null };
+  ph.byDay[day][key] = value || null;
+  save(); render();
 }
 
 /* 画面と書き出し画像で同じ文面を使う（short=画像用。横幅が固定なので長い行は畳む） */
@@ -2312,8 +2443,9 @@ function setWant(rides) {
   save(); render();
 }
 
-function renderWant(c) {
-  if (!c) { $('want').innerHTML = ''; return; }
+function renderWant(P) {
+  if (!P) { $('want').innerHTML = ''; return; }
+  const c = { wants: P.wants };
   const on = (wantC() || {}).rides || [];
   $('want').innerHTML = `<div class="avoid">
     <div class="ah">行きたいアトラクション${on.length ? `（${on.length}件）` : ''}</div>
@@ -2321,8 +2453,9 @@ function renderWant(c) {
       `<button class="ax ${on.indexOf(a.id) >= 0 ? 'on' : ''}" data-ride="${a.id}" style="${on.indexOf(a.id) >= 0 ? 'background:var(--measure);border-color:var(--measure)' : ''}">${on.indexOf(a.id) >= 0 ? '★ ' : ''}${esc(a.short)}</button>`).join('')}</div>
     ${c.wants.length ? `<div style="margin-top:8px">${c.wants.map(w => {
       const st = WANT_STATE[w.state] || { s: w.state, c: '' };
-      const detail = w.state === 'fixed' ? `${w.at}〜の枠`
-        : w.state === 'planned' || w.state === 'tight' ? `${w.at}–${w.until} の区間（入るのは${w.capacity != null ? w.capacity + '件' : '未計算'}／希望${w.wantN}件）`
+      const d = P.multi && w.nth ? `${w.nth}日目 ` : '';
+      const detail = w.state === 'fixed' ? `${d}${w.at}〜の枠`
+        : w.state === 'planned' || w.state === 'tight' ? `${d}${w.at}–${w.until} の区間（入るのは${w.capacity != null ? w.capacity + '件' : '未計算'}／希望${w.wantN}件）`
         : w.state === 'dropped' ? esc(w.why)
         : w.state === 'unreachable' ? (w.insert ? `${w.insert.step.at}–${w.insert.step.until} に寄せると +${w.insert.extra}分` : '寄れる区間がありません')
         : st.t;
@@ -2346,8 +2479,12 @@ function setAvoid(areas, from, to, label) {
   save(); render();
 }
 
-function renderAvoid(c) {
-  if (!c) { $('avoid').innerHTML = ''; return; }
+function renderAvoid(P) {
+  if (!P) { $('avoid').innerHTML = ''; return; }
+  /* ハザードは日ごとに違う（期間内の日だけ）。日付つきで並べる */
+  const seen = new Set();
+  const c = { hazards: P.days.flatMap(d => d.hazards.map(h => ({ ...h, day: d.day })))
+    .filter(h => !seen.has(h.id + h.day) && seen.add(h.id + h.day)) };
   const av = avoidC();
   const on = av ? av.areas : [];
   $('avoid').innerHTML = `<div class="avoid">
@@ -2357,7 +2494,7 @@ function renderAvoid(c) {
     ${on.length ? `<div class="at">避ける時間帯
       <input type="time" id="av-from" value="${av.from || ''}">–<input type="time" id="av-to" value="${av.to || ''}">
       <span>（空欄なら終日）</span><button class="ghost" id="av-clear">すべて解除</button></div>` : ''}
-    ${c.hazards.map(h => `<div class="hz">💡 ${esc(c.day || '')} は「${esc(h.label)}」の期間です（${esc(h.from || '')}〜${h.to ? esc(h.to) : 'パーククローズ'}）。${esc(h.note || '')}
+    ${c.hazards.map(h => `<div class="hz">💡 ${esc(h.day || '')} は「${esc(h.label)}」の期間です（${esc(h.from || '')}〜${h.to ? esc(h.to) : 'パーククローズ'}）。${esc(h.note || '')}
       ${h.areas.some(a => on.indexOf(a) < 0) ? `<button class="ghost" data-hz="${esc(h.id)}">${esc(h.areas.join('・'))}を避ける</button>` : ''}
       ${h.verifiedAt ? '' : '<em>※出没エリアは未検証。当日の公式マップで必ず確認してください</em>'}</div>`).join('')}
   </div>`;
@@ -2380,30 +2517,44 @@ function renderAvoid(c) {
   });
 }
 
-function renderCourse() {
-  const c = LAYOUT ? S.course({ day: courseDay }) : null;
-  renderWant(c);
-  renderAvoid(c);
-  const ph = parkHours();
-  const days = S.parkDays();
-  $('c-daysel').innerHTML = (days.length ? days : [c && c.day].filter(Boolean))
-    .map(d => `<option value="${d}" ${c && d === c.day ? 'selected' : ''}>${d}</option>`).join('')
-    || '<option value="">券の日付が未定</option>';
-  $('c-open').value = ph.open || (c && c.open) || '';
-  $('c-close').value = ph.close || '';
-  $('c-wait').value = ph.waitMin ?? (LAYOUT ? LAYOUT.assumeWaitMin : 45);
-  $('c-day').textContent = c
-    ? `${c.day || '日付未定'}｜待ち${c.assumeWait}分と仮定${c.approx ? '・徒歩分は概算' : ''}`
-    : '';
+const warnHtml = w =>
+  `<div class="fd"><div class="ic ${w.lv}">${w.lv === 'warn' ? '!' : w.lv === 'good' ? '✓' : 'i'}</div><div class="bd">
+    <div class="ti">${esc(w.ti)}</div><div class="dt">${esc(w.dt)}</div>
+    ${w.fix ? `<div class="fix">${esc(w.fix)}</div>` : ''}</div></div>`;
 
-  if (!c) {
+function renderCourse() {
+  const P = LAYOUT ? S.plan() : null;
+  renderWant(P);
+  renderAvoid(P);
+  const ph = parkHours();
+  $('c-wait').value = ph.waitMin ?? (LAYOUT ? LAYOUT.assumeWaitMin : 45);
+
+  if (!P) {
+    $('c-days').textContent = '';
+    $('c-day').textContent = '';
     $('course').innerHTML = '<div class="empty">このパークの地理データ（park-layout）がありません。</div>';
     return;
   }
-  const warns = c.warns.map(w =>
-    `<div class="fd"><div class="ic ${w.lv}">${w.lv === 'warn' ? '!' : 'i'}</div><div class="bd">
-      <div class="ti">${esc(w.ti)}</div><div class="dt">${esc(w.dt)}</div>
-      ${w.fix ? `<div class="fix">${esc(w.fix)}</div>` : ''}</div></div>`).join('');
+  $('c-day').textContent = `待ち${P.days[0].assumeWait}分と仮定${P.days[0].approx ? '・徒歩分は概算' : ''}`;
+  $('c-days').textContent = P.multi
+    ? `${P.days.length}日ぶん（${P.days.map(d => d.day).join(' / ')}）。前の日に回るぶんは翌日の候補から外しています`
+    : '';
+
+  $('course').innerHTML = P.warns.map(warnHtml).join('')
+    + P.days.map(c => dayHtml(c, P)).join('');
+
+  $('course').querySelectorAll('.dayhd input[type=time]').forEach(el =>
+    el.addEventListener('change', e => setDayHours(el.dataset.day, el.dataset.k, e.target.value)));
+}
+
+function dayHtml(c, P) {
+  const info = (c.info || [])[0];
+  const head = `<div class="dayhd">
+      ${P.multi ? `<span class="n">${c.nth}日目</span>` : ''}<span class="d">${esc(c.day || '日付未定')}</span>
+      ${info && info.of > 1 ? `<span class="d">${esc(info.ticket)}（${info.nth}/${info.of}日目）</span>` : ''}
+      <span class="t">開園<input type="time" data-day="${c.day}" data-k="open" value="${c.open || ''}">
+        閉園<input type="time" data-day="${c.day}" data-k="close" value="${c.close || ''}"></span>
+    </div>`;
 
   const steps = c.steps.map(s => {
     if (s.kind === 'move') {
@@ -2427,17 +2578,18 @@ function renderCourse() {
         <em>時間指定（動かせない）${s.area ? '｜' + esc(s.area) : ''}${s.reentry === false ? '｜再入場不可' : ''}${s.openEnd ? '｜終了時刻が未登録' : ''}</em></div></div>`;
     }
     if (s.kind === 'nap') {
-      const where = s.where === 'inpark' ? 'パーク内で休む' : s.where === 'out' ? '一度パークを出る' : '場所は未定';
+      const where = s.preEntry ? '入園前（この日はここから）'
+        : s.where === 'inpark' ? 'パーク内で休む' : s.where === 'out' ? '一度パークを出る' : '場所は未定';
       return `<div class="cstep nap"><div class="t mono">${s.at}–${s.until}</div>
         <div class="b">${esc(s.label || '休憩')}<em>動かせない固定点として区間を割っています｜${where}${
-          c.reentry === false && s.where !== 'inpark' ? '（この券では出ると戻れません）' : ''}</em></div></div>`;
+          c.reentry === false && !s.preEntry && s.where !== 'inpark' ? '（この券では出ると戻れません）' : ''}</em></div></div>`;
     }
     return `<div class="cstep"><div class="t mono">${s.at || '--:--'}</div>
       <div class="b">${esc(s.b)}<em>${esc(s.e)}</em></div></div>`;
   }).join('');
 
-  $('course').innerHTML = warns + steps +
-    `<div class="note-sm">徒歩分は地図からの概算（実測ではありません）。待ち時間は当日の状況次第なので推定しません — 上の「待ち」は件数を数えるための仮定値です。</div>`;
+  return head + c.warns.map(warnHtml).join('') + steps
+    + (c.nth === c.of ? '<div class="note-sm">徒歩分は地図からの概算（実測ではありません）。待ち時間は当日の状況次第なので推定しません — 上の「待ち」は件数を数えるための仮定値です。</div>' : '');
 }
 
 function renderDerived() {
@@ -2531,26 +2683,29 @@ function exportImage() {
     lines.push({ t: '・' + f.ti, s: 18, c: '#12202E' });
     if (f.fix) wrap('　→ ' + f.fix, 46).forEach(w => lines.push({ t: w, s: 16, c: '#5A6B7A' }));
   });
-  /* 回り順（当日、家族に見せる形）。金額と同じく「決めたこと」だけを短く出す */
-  const C = LAYOUT ? S.course({ day: courseDay }) : null;
-  if (C && C.steps.some(s => s.kind !== 'open' && s.kind !== 'exit')) {
+  /* 回り順（家族に見せる形）。1.5デイ等は日ごとに分けて出す */
+  const P = LAYOUT ? S.plan() : null;
+  if (P && P.days.some(c => c.steps.some(s => s.kind !== 'open' && s.kind !== 'exit'))) {
     lines.push({ t: '', s: 10 });
-    lines.push({ t: `パーク内の回り順（${C.day || '日付未定'}）`, s: 22, b: true, c: '#12202E' });
-    C.avoids.forEach(a => wrap(`　${a.label}を避ける前提：${a.areas.join('・')}${a.from ? `（${a.from}〜${a.to || '閉園'}）` : ''}`, 40)
+    lines.push({ t: 'パーク内の回り順', s: 22, b: true, c: '#12202E' });
+    (P.days[0].avoids || []).forEach(a => wrap(`　${a.label}を避ける前提：${a.areas.join('・')}${a.from ? `（${a.from}〜${a.to || '閉園'}）` : ''}`, 40)
       .forEach(w => lines.push({ t: w, s: 15, c: '#C0453B' })));
-    if (C.wants.length) {
-      const okw = C.wants.filter(w => w.state === 'planned' || w.state === 'fixed');
-      wrap(`　行きたい ${C.wants.length}件のうち入るのは ${okw.length}件：${okw.map(w => w.short).join('・') || 'なし'}`, 40)
+    if (P.wants.length) {
+      const okw = P.wants.filter(w => w.state === 'planned' || w.state === 'fixed');
+      wrap(`　行きたい ${P.wants.length}件のうち入るのは ${okw.length}件：${okw.map(w => w.short).join('・') || 'なし'}`, 40)
         .forEach(w => lines.push({ t: w, s: 15, c: '#5A6B7A' }));
-      C.wants.filter(w => w.state !== 'planned' && w.state !== 'fixed').forEach(w =>
+      P.wants.filter(w => w.state !== 'planned' && w.state !== 'fixed').forEach(w =>
         wrap(`　× ${w.short}：${(WANT_STATE[w.state] || {}).s || w.state}`, 40)
           .forEach(x => lines.push({ t: x, s: 15, c: '#C0453B' })));
     }
-    C.steps.slice(0, 8).forEach(s => wrap('・' + courseLine(s, true), 42)
-      .forEach(w => lines.push({ t: w, s: 16, c: s.kind === 'fixed' ? '#12202E' : '#5A6B7A' })));
-    lines.push({ t: `　※件数は待ち${C.assumeWait}分と置いた場合の目安。徒歩分は概算です`, s: 14, c: '#5A6B7A' });
-    C.warns.filter(w => w.lv === 'warn').slice(0, 2).forEach(w =>
-      lines.push({ t: '・' + w.ti, s: 16, c: '#C0453B' }));
+    P.days.forEach(C => {
+      lines.push({ t: `${P.multi ? C.nth + '日目 ' : ''}${C.day || '日付未定'}（${C.open || '?'}〜${C.close || '?'}）`, s: 18, b: true, c: '#12202E' });
+      C.steps.slice(0, 7).forEach(s => wrap('・' + courseLine(s, true), 42)
+        .forEach(w => lines.push({ t: w, s: 16, c: s.kind === 'fixed' ? '#12202E' : '#5A6B7A' })));
+      C.warns.filter(w => w.lv === 'warn').slice(0, 2).forEach(w =>
+        lines.push({ t: '・' + w.ti, s: 16, c: '#C0453B' }));
+    });
+    lines.push({ t: `　※件数は待ち${P.days[0].assumeWait}分と置いた場合の目安。徒歩分は概算です`, s: 14, c: '#5A6B7A' });
   }
   lines.push({ t: '', s: 10 });
   const bks = S.bookings(todayIso()).filter(b => b.state === '受付中' || b.state === '未' || b.state === '監視中');
@@ -2645,9 +2800,6 @@ $('d-budget').addEventListener('change', e => { ST.budget = e.target.value === '
   $(prefix + '-date').addEventListener('change', upd);
 });
 /* 回り順：開園・閉園・待ちの仮定は旅行ごとに保存する。日の選択は保存しない（見るだけ） */
-$('c-daysel').addEventListener('change', e => { courseDay = e.target.value || null; render(); });
-$('c-open').addEventListener('change', e => { parkHours().open = e.target.value || null; save(); render(); });
-$('c-close').addEventListener('change', e => { parkHours().close = e.target.value || null; save(); render(); });
 $('c-wait').addEventListener('change', e => {
   parkHours().waitMin = e.target.value === '' ? null : +e.target.value;
   save(); render();
