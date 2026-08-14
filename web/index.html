@@ -641,6 +641,21 @@ window.DANDORI_DATA = {
    "TODO(verify): openDefault は仮の既定値。開園時刻は日によって変わるので、画面から当日の値を入れて上書きする",
    "TODO(verify): closeDefault は null（不明）のまま。閉園時刻は日によって変わるため既定値を置かない"
   ],
+  "_reentry_comment": "パークの『再入場』は、エリア入場整理券の『再入場不可』とは別物。こちらは券種の話で、退場したら同じ券では戻れない",
+  "reentry": {
+   "allowed": false,
+   "annualPassOnly": true,
+   "passPattern": "年間パス|年パス|アニュアル|annual",
+   "note": "スタジオ・パス（1デイ／1.5デイ／2デイ等）では再入場できません。年間パスは退場時に出口のクルーへ提示し、再入場スタンプを受ければ戻れます",
+   "exceptions": [
+    "混雑期（GW等）に一般ゲストも再入場できる日があります",
+    "学校団体は申込時の申請で認められます（券面が再入場不可でも可）",
+    "当日パーク内の年間パスセンターで年間パスへアップグレードすれば戻れます"
+   ],
+   "verifiedAt": null,
+   "source": "https://castel.jp/p/2827",
+   "_todo": "TODO(verify): 公式のよくあるご質問・利用規約で要確認（公式ページはJS描画で機械取得できず未検証）。運用は日・券種で変わる"
+  },
   "_hazards_comment": "『通りたくない』の候補を先に出すためのデータ。避けるかどうかを決めるのは利用者で、ここは提案にすぎない（constraints の avoid が正）。areas は ring の area 名で書く",
   "hazards": [
    {
@@ -1059,9 +1074,12 @@ window.DANDORI_DATA = {
               dt: `${s.name} は ${s.at}〜 で再入場できません。${c.label}（${c.from}–${c.to}）と時間帯が接触します。`,
               fix: `昼寝を ${s.until} 以降にずらす。エリアは一度の滞在で完結させる前提で組む。` });
           } else if (Math.abs(E - a) <= 30) {
+            /* ★「ホテルで休憩」と書けるのは、パークへ戻れるときだけ。
+               USJは年間パス以外は再入場できない＝出たらその日は終わり。券種を見て文面を変える */
             f.push({ lv: 'note', kind: 'adjacent', ti: '昼寝は指定枠の直後に置けます',
               dt: `${s.name}（${s.at}〜${s.until}・再入場不可）を終えてから ${c.label} に入る形なら衝突しません。`,
-              fix: `午前は下の子向け → ${s.at} に指定枠 → ${s.until} からホテルで休憩、の順に固定。` });
+              fix: `午前は下の子向け → ${s.at} に指定枠 → ${s.until} から休憩、の順に固定。`
+                + (canReenter() ? '' : ' ただしパークを出ると同じ券では戻れないので、休憩はパーク内でとるか、出るならこれを最後の予定にする。') });
           }
         });
       }
@@ -1369,6 +1387,13 @@ window.DANDORI_DATA = {
     if (infants.length && !STATE.constraints.some(c => c.type === 'nap')) {
       u.push({ what: `昼寝の時間帯（${infants.map(p => p.name).join('・')}）`, why: '再入場不可の時間指定と衝突しうる' });
     }
+    /* 昼寝の場所は「パークを出るか」＝再入場できるかの分岐。年間パス以外は出たら戻れない */
+    if (canReenter() === false) {
+      STATE.constraints.filter(c => c.type === 'nap' && !c.where).forEach(c => {
+        u.push({ what: `${c.label || '昼寝'}の場所（パーク内か、一度出るか）`,
+          why: 'いまの券では出ると戻れない。どちらかで組み方が変わる' });
+      });
+    }
     if (STATE.hotel && !STATE.hotel.checkIn) u.push({ what: '宿のチェックイン日', why: '解禁監視・逆算に必要' });
     STATE.tickets.forEach(t => { if (!t.date) u.push({ what: `${t.name}の入場日`, why: '時間指定の衝突検査に必要' }); });
     /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
@@ -1484,6 +1509,18 @@ window.DANDORI_DATA = {
   /* 画面が「通りたくないエリア」を並べるための一覧（環の順） */
   const areas = () => ring().map(r => r.area);
 
+  /* ★パークの再入場（券種の話）。エリア入場整理券の「再入場不可」とは別物。
+     USJは年間パス以外は再入場できない＝一度出たらその日は戻れない。
+     データが無いパークでは「分からない」= null を返し、断定しない */
+  function canReenter() {
+    const r = LAYOUT && LAYOUT.reentry;
+    if (!r) return null;
+    if (r.allowed === true) return true;
+    if (!r.annualPassOnly) return false;
+    const pat = new RegExp(r.passPattern || '年間パス|年パス', 'i');
+    return (STATE.tickets || []).some(t => pat.test(t.name || ''));
+  }
+
   /* 期間中に出るもの（ゾンビ等）。避けるかどうかを決めるのは利用者なので、ここは候補を返すだけ */
   function hazards(day) {
     const hs = (LAYOUT && LAYOUT.hazards) || [];
@@ -1549,7 +1586,7 @@ window.DANDORI_DATA = {
     /* 固定点2：昼寝。エリアは動かない（休むだけ）が、時間は確実に消える */
     (STATE.constraints || []).filter(c => c.type === 'nap').forEach(c => {
       blocks.push({ kind: 'nap', start: toMin(c.from), end: toMin(c.to),
-        at: c.from, until: c.to, area: null, label: c.label, items: [] });
+        at: c.from, until: c.to, area: null, label: c.label, where: c.where || null, items: [] });
     });
     blocks.sort((a, b) => a.start - b.start || a.end - b.end);
 
@@ -1650,7 +1687,7 @@ window.DANDORI_DATA = {
             ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
-        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label });
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where });
       }
       cur = Math.max(cur == null ? b.end : cur, b.end);
     });
@@ -1738,6 +1775,32 @@ window.DANDORI_DATA = {
       dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
       fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
 
+    /* ★パークを出て休むなら、戻れるかを先に出す。
+       USJは年間パス以外は再入場できない＝昼寝でホテルへ帰ると、その日はそこで終わり。
+       「昼寝の後にまだ予定がある」形になっていたら、それは組めない旅程になる */
+    const reenter = canReenter();
+    if (reenter === false) {
+      steps.forEach((s, i) => {
+        if (s.kind !== 'nap' || s.where === 'inpark') return;
+        const after = steps.slice(i + 1).filter(x =>
+          x.kind === 'fixed' || (x.kind === 'move' && x.items.length));
+        if (!after.length) {
+          if (s.where === 'out') warns.push({ lv: 'note', kind: 'reentryLast',
+            ti: `${s.at} にパークを出ると、その日はそこで終わりです`,
+            dt: `${s.label || '休憩'}でパークを出ると、いまの券では戻れません（再入場は年間パスのみ）。`,
+            fix: '出る前に、その日にやることを終わらせておく。' });
+          return;
+        }
+        const last = after[after.length - 1];
+        warns.push({ lv: 'warn', kind: 'reentry',
+          ti: `${s.at}–${s.until} にパークを出ると戻れません`,
+          dt: `${s.label || '休憩'}のあとに ${after.length}件の予定（${last.kind === 'fixed' ? last.at + 'の時間指定' : last.at + '–' + last.until + 'の区間'}まで）が残っています。`
+            + `いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
+          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして以降の予定を捨てる。'
+            + ((LAYOUT.reentry && LAYOUT.reentry.exceptions || []).length ? ` 例外：${LAYOUT.reentry.exceptions.join('／')}。` : '') });
+      });
+    }
+
     /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
     steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
       const why = s.dropped.length
@@ -1818,7 +1881,7 @@ window.DANDORI_DATA = {
     }
 
     return { day, open, close, closeSrc, assumeWait: wait, entrance,
-      avoids, hazards: hazards(day), wants: wantStatus,
+      avoids, hazards: hazards(day), wants: wantStatus, reentry: reenter,
       walkMin: walked, forcedWalkMin: forced, steps, warns,
       approx: !LAYOUT.verifiedAt };
   }
@@ -2027,10 +2090,16 @@ function renderPeople() {
   const infants = ST.people.filter(p => !p.adult && p.age != null && p.age <= 3);
   $('naps').innerHTML = infants.map(p => {
     const nap = ST.constraints.find(c => c.type === 'nap' && c.who === p.id);
+    /* 場所は「パークを出るか」の分岐。再入場できない券だと、出た時点でその日が終わる */
     return `<div class="naprow" data-who="${p.id}">
       <label><input type="checkbox" class="nap-on" ${nap ? 'checked' : ''}> ${esc(p.name)}の昼寝</label>
       <input type="time" class="nap-from" value="${nap ? nap.from : '13:00'}" ${nap ? '' : 'disabled'}>–
       <input type="time" class="nap-to" value="${nap ? nap.to : '15:00'}" ${nap ? '' : 'disabled'}>
+      <select class="nap-where" ${nap ? '' : 'disabled'}>
+        <option value="" ${nap && !nap.where ? 'selected' : ''}>場所 未定</option>
+        <option value="inpark" ${nap && nap.where === 'inpark' ? 'selected' : ''}>パーク内で休む</option>
+        <option value="out" ${nap && nap.where === 'out' ? 'selected' : ''}>一度パークを出る</option>
+      </select>
     </div>`;
   }).join('');
   $('naps').querySelectorAll('.naprow').forEach(row => {
@@ -2039,11 +2108,12 @@ function renderPeople() {
     const upd = () => {
       ST.constraints = ST.constraints.filter(c => !(c.type === 'nap' && c.who === who));
       if (row.querySelector('.nap-on').checked) {
-        ST.constraints.push({ type: 'nap', who, from: row.querySelector('.nap-from').value, to: row.querySelector('.nap-to').value, label: `${p.name}(${p.age}歳)の昼寝` });
+        ST.constraints.push({ type: 'nap', who, from: row.querySelector('.nap-from').value, to: row.querySelector('.nap-to').value,
+          where: row.querySelector('.nap-where').value || null, label: `${p.name}(${p.age}歳)の昼寝` });
       }
       save(); render();
     };
-    row.querySelectorAll('input').forEach(el => el.addEventListener('change', upd));
+    row.querySelectorAll('input,select').forEach(el => el.addEventListener('change', upd));
   });
 }
 
@@ -2357,8 +2427,10 @@ function renderCourse() {
         <em>時間指定（動かせない）${s.area ? '｜' + esc(s.area) : ''}${s.reentry === false ? '｜再入場不可' : ''}${s.openEnd ? '｜終了時刻が未登録' : ''}</em></div></div>`;
     }
     if (s.kind === 'nap') {
+      const where = s.where === 'inpark' ? 'パーク内で休む' : s.where === 'out' ? '一度パークを出る' : '場所は未定';
       return `<div class="cstep nap"><div class="t mono">${s.at}–${s.until}</div>
-        <div class="b">${esc(s.label || '休憩')}<em>動かせない固定点として区間を割っています</em></div></div>`;
+        <div class="b">${esc(s.label || '休憩')}<em>動かせない固定点として区間を割っています｜${where}${
+          c.reentry === false && s.where !== 'inpark' ? '（この券では出ると戻れません）' : ''}</em></div></div>`;
     }
     return `<div class="cstep"><div class="t mono">${s.at || '--:--'}</div>
       <div class="b">${esc(s.b)}<em>${esc(s.e)}</em></div></div>`;

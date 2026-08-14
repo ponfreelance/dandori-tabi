@@ -125,9 +125,12 @@
               dt: `${s.name} は ${s.at}〜 で再入場できません。${c.label}（${c.from}–${c.to}）と時間帯が接触します。`,
               fix: `昼寝を ${s.until} 以降にずらす。エリアは一度の滞在で完結させる前提で組む。` });
           } else if (Math.abs(E - a) <= 30) {
+            /* ★「ホテルで休憩」と書けるのは、パークへ戻れるときだけ。
+               USJは年間パス以外は再入場できない＝出たらその日は終わり。券種を見て文面を変える */
             f.push({ lv: 'note', kind: 'adjacent', ti: '昼寝は指定枠の直後に置けます',
               dt: `${s.name}（${s.at}〜${s.until}・再入場不可）を終えてから ${c.label} に入る形なら衝突しません。`,
-              fix: `午前は下の子向け → ${s.at} に指定枠 → ${s.until} からホテルで休憩、の順に固定。` });
+              fix: `午前は下の子向け → ${s.at} に指定枠 → ${s.until} から休憩、の順に固定。`
+                + (canReenter() ? '' : ' ただしパークを出ると同じ券では戻れないので、休憩はパーク内でとるか、出るならこれを最後の予定にする。') });
           }
         });
       }
@@ -435,6 +438,13 @@
     if (infants.length && !STATE.constraints.some(c => c.type === 'nap')) {
       u.push({ what: `昼寝の時間帯（${infants.map(p => p.name).join('・')}）`, why: '再入場不可の時間指定と衝突しうる' });
     }
+    /* 昼寝の場所は「パークを出るか」＝再入場できるかの分岐。年間パス以外は出たら戻れない */
+    if (canReenter() === false) {
+      STATE.constraints.filter(c => c.type === 'nap' && !c.where).forEach(c => {
+        u.push({ what: `${c.label || '昼寝'}の場所（パーク内か、一度出るか）`,
+          why: 'いまの券では出ると戻れない。どちらかで組み方が変わる' });
+      });
+    }
     if (STATE.hotel && !STATE.hotel.checkIn) u.push({ what: '宿のチェックイン日', why: '解禁監視・逆算に必要' });
     STATE.tickets.forEach(t => { if (!t.date) u.push({ what: `${t.name}の入場日`, why: '時間指定の衝突検査に必要' }); });
     /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
@@ -550,6 +560,18 @@
   /* 画面が「通りたくないエリア」を並べるための一覧（環の順） */
   const areas = () => ring().map(r => r.area);
 
+  /* ★パークの再入場（券種の話）。エリア入場整理券の「再入場不可」とは別物。
+     USJは年間パス以外は再入場できない＝一度出たらその日は戻れない。
+     データが無いパークでは「分からない」= null を返し、断定しない */
+  function canReenter() {
+    const r = LAYOUT && LAYOUT.reentry;
+    if (!r) return null;
+    if (r.allowed === true) return true;
+    if (!r.annualPassOnly) return false;
+    const pat = new RegExp(r.passPattern || '年間パス|年パス', 'i');
+    return (STATE.tickets || []).some(t => pat.test(t.name || ''));
+  }
+
   /* 期間中に出るもの（ゾンビ等）。避けるかどうかを決めるのは利用者なので、ここは候補を返すだけ */
   function hazards(day) {
     const hs = (LAYOUT && LAYOUT.hazards) || [];
@@ -615,7 +637,7 @@
     /* 固定点2：昼寝。エリアは動かない（休むだけ）が、時間は確実に消える */
     (STATE.constraints || []).filter(c => c.type === 'nap').forEach(c => {
       blocks.push({ kind: 'nap', start: toMin(c.from), end: toMin(c.to),
-        at: c.from, until: c.to, area: null, label: c.label, items: [] });
+        at: c.from, until: c.to, area: null, label: c.label, where: c.where || null, items: [] });
     });
     blocks.sort((a, b) => a.start - b.start || a.end - b.end);
 
@@ -716,7 +738,7 @@
             ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
         if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
       } else {
-        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label });
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where });
       }
       cur = Math.max(cur == null ? b.end : cur, b.end);
     });
@@ -804,6 +826,32 @@
       dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
       fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
 
+    /* ★パークを出て休むなら、戻れるかを先に出す。
+       USJは年間パス以外は再入場できない＝昼寝でホテルへ帰ると、その日はそこで終わり。
+       「昼寝の後にまだ予定がある」形になっていたら、それは組めない旅程になる */
+    const reenter = canReenter();
+    if (reenter === false) {
+      steps.forEach((s, i) => {
+        if (s.kind !== 'nap' || s.where === 'inpark') return;
+        const after = steps.slice(i + 1).filter(x =>
+          x.kind === 'fixed' || (x.kind === 'move' && x.items.length));
+        if (!after.length) {
+          if (s.where === 'out') warns.push({ lv: 'note', kind: 'reentryLast',
+            ti: `${s.at} にパークを出ると、その日はそこで終わりです`,
+            dt: `${s.label || '休憩'}でパークを出ると、いまの券では戻れません（再入場は年間パスのみ）。`,
+            fix: '出る前に、その日にやることを終わらせておく。' });
+          return;
+        }
+        const last = after[after.length - 1];
+        warns.push({ lv: 'warn', kind: 'reentry',
+          ti: `${s.at}–${s.until} にパークを出ると戻れません`,
+          dt: `${s.label || '休憩'}のあとに ${after.length}件の予定（${last.kind === 'fixed' ? last.at + 'の時間指定' : last.at + '–' + last.until + 'の区間'}まで）が残っています。`
+            + `いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
+          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして以降の予定を捨てる。'
+            + ((LAYOUT.reentry && LAYOUT.reentry.exceptions || []).length ? ` 例外：${LAYOUT.reentry.exceptions.join('／')}。` : '') });
+      });
+    }
+
     /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
     steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
       const why = s.dropped.length
@@ -884,7 +932,7 @@
     }
 
     return { day, open, close, closeSrc, assumeWait: wait, entrance,
-      avoids, hazards: hazards(day), wants: wantStatus,
+      avoids, hazards: hazards(day), wants: wantStatus, reentry: reenter,
       walkMin: walked, forcedWalkMin: forced, steps, warns,
       approx: !LAYOUT.verifiedAt };
   }

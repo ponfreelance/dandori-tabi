@@ -536,6 +536,74 @@ ok('時間の余りで一周するのは「往復のムダ」に数えない', (
   S.configure({ attractions, rules, layout, state });
 });
 
+// ── パークの再入場（券種の話。エリア整理券の「再入場不可」とは別物） ──
+const napTrip = (where, ticketName) => {
+  const t = S.emptyTrip();
+  t.people = state.people;
+  t.parkHours = { open: '09:00', close: '20:00', waitMin: null };
+  t.tickets = [{ name: ticketName || '1.5デイ・スタジオ・パス', date: '2026-11-16', free: [], fixed: [
+    { at: '17:00', until: '17:30', name: 'ジョーズ' },     // 昼寝のあとに残る予定
+  ] }];
+  t.constraints = [{ type: 'nap', who: 'p5', from: '13:30', to: '15:30', where, label: '第3子(1歳)の昼寝' }];
+  return t;
+};
+
+ok('再入場データ：年間パス以外は戻れない（未検証フラグつき）', () => {
+  assert.equal(layout.reentry.allowed, false);
+  assert.equal(layout.reentry.annualPassOnly, true);
+  assert.equal(layout.reentry.verifiedAt, null, '公式で未検証');
+  assert.ok(layout.reentry.exceptions.length >= 2, '例外（団体・年パスアップグレード等）を持つ');
+});
+
+ok('スタジオ・パスで昼寝に出ると「戻れません」', () => {
+  S.configure({ attractions, rules, layout, state: napTrip('out') });
+  const c = S.course();
+  assert.equal(c.reentry, false);
+  const w = c.warns.find(x => x.kind === 'reentry');
+  assert.ok(w, '警告を出す');
+  assert.ok(w.ti.includes('戻れません'));
+  assert.ok(w.dt.includes('件の予定'), '昼寝の後に何が残るかを言う');
+  assert.ok(w.fix.includes('パーク内で休む'), '代替を出す');
+  assert.ok(w.fix.includes('年間パス'), '例外も併記する');
+});
+
+ok('パーク内で休むなら警告は出ない', () => {
+  S.configure({ attractions, rules, layout, state: napTrip('inpark') });
+  assert.equal(S.course().warns.filter(x => x.kind === 'reentry').length, 0);
+});
+
+ok('年間パスなら再入場できる', () => {
+  S.configure({ attractions, rules, layout, state: napTrip('out', 'ユニバーサル年間パス・ライト') });
+  const c = S.course();
+  assert.equal(c.reentry, true);
+  assert.equal(c.warns.filter(x => x.kind === 'reentry').length, 0);
+});
+
+ok('出るのが最後なら「その日はそこで終わり」と出す', () => {
+  const t = napTrip('out');
+  t.tickets[0].fixed = [];                      // 昼寝の後に予定なし
+  t.parkHours = { open: '09:00', close: '15:30', waitMin: null };
+  S.configure({ attractions, rules, layout, state: t });
+  const w = S.course().warns.find(x => x.kind === 'reentryLast');
+  assert.ok(w && w.ti.includes('その日はそこで終わり'));
+  assert.equal(S.course().warns.filter(x => x.kind === 'reentry').length, 0);
+});
+
+ok('昼寝の場所が未定なら「これから決めること」に出る', () => {
+  S.configure({ attractions, rules, layout, state: napTrip(null) });
+  assert.ok(S.undecided().some(x => x.what.includes('場所')));
+  S.configure({ attractions, rules, layout, state: napTrip('inpark') });
+  assert.ok(!S.undecided().some(x => x.what.includes('場所')));
+});
+
+ok('「ホテルで休憩」と案内しない（戻れない券のとき）', () => {
+  S.configure({ attractions, rules, layout, state });
+  const adj = S.solve().find(f => f.kind === 'adjacent');
+  assert.ok(adj, '隣接の提案は出る');
+  assert.ok(!adj.fix.includes('ホテルで休憩'), '戻れないのにホテルへ帰す案内をしない');
+  assert.ok(adj.fix.includes('戻れない'), '再入場できないことを言う');
+});
+
 // ── 行きたいアトラクション ──
 const wantTrip = (rides, fixed) => {
   const t = S.emptyTrip();
