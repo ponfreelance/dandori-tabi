@@ -247,9 +247,8 @@ ok('予算内・予算未設定なら Finding を出さない', () => {
   S.configure({ attractions, rules, layout, state });
 });
 
-// 追加検証: 新幹線控えのパース
-// TODO(fixture): 合成データ（SmartEX/EX予約の一般的な書式）。実物の控えでの検証待ち
-ok('新幹線控えのパース（合成・要実物検証）', () => {
+// 追加検証: 新幹線控えのパース（旧来の合成書式）
+ok('新幹線控えのパース（テキスト控えの書式）', () => {
   const t = P.parseAny(`2026/11/17（火）
 のぞみ42号 普通車指定席
 新大阪 16:30発
@@ -269,6 +268,52 @@ ok('新幹線控えのパース（合成・要実物検証）', () => {
   const t2 = P.parseTrain('ひかり503号 東京（06:33発）→ 新大阪（09:13着）');
   assert.equal(t2.from, '東京');
   assert.equal(t2.arrive, '09:13');
+});
+
+// 追加検証: スマートEXアプリ「詳細」画面の実書式
+// ※実機の控え（2026-08-15）で書式を確認し、値は加工した（日付・列車・区間・席は架空）
+ok('スマートEXアプリの控えをそのまま貼れる', () => {
+  const t = P.parseAny(`詳細
+1234
+乗車日時
+2026/7/4（土） 9:03 → 11:28
+区間
+新横浜 → 京都
+人数
+おとな 2　こども 2
+商品
+スマート EX
+運行状況
+のぞみ 271
+N700系16両, 全車指定席
+時間
+9:03 → 11:28
+区間
+新横浜 → 京都
+座席
+9号車 7番 D/E席, 8番 D/E席
+普通車`);
+  assert.equal(t.type, 'train', '種別を判別できる');
+  assert.equal(t.date, '2026-07-04', '1桁の月日（2026/7/4）を読む');
+  assert.equal(t.trainName, 'のぞみ271', '「号」が無い表記');
+  assert.equal(t.from, '新横浜');
+  assert.equal(t.to, '京都', '矢印だけの区間（発着の文字なし）');
+  assert.equal(t.depart, '09:03', '1桁の時は0埋めする');
+  assert.equal(t.arrive, '11:28');
+  assert.equal(t.car, 9);
+  // ★「7番 D/E席」は2席。畳まれた表記を展開しないと席数を取り違える
+  assert.deepEqual(t.seats, ['7D', '7E', '8D', '8E']);
+  assert.equal(t.adults, 2);
+  assert.equal(t.children, 2);
+  assert.equal(t.seats.length, t.adults + t.children, '席数と人数が一致する');
+  assert.equal(t.product, 'スマートEX');
+});
+ok('畳まれた席表記でも、旧来の平坦な表記でも読める', () => {
+  const folded = P.parseTrain('座席 3号車 12番 A/B/C席');
+  assert.deepEqual(folded.seats, ['12A', '12B', '12C']);
+  const flat = P.parseTrain('座席：7号車 11A,11B,11C');
+  assert.deepEqual(flat.seats, ['11A', '11B', '11C']);
+  assert.equal(flat.car, 7);
 });
 
 // 追加検証: 交通手段の一般化（行き=新幹線・帰り=飛行機の決め打ちを排除）
