@@ -44,7 +44,7 @@
    "mode": "exact",
    "criticality": "singlePoint",
    "note": "乗車1ヶ月前の同日10時＝きっぷの発売開始。席番を選べるのはここから（1年前予約の席の変更も10時以降）。★暦月で引くこと（-30日だと1日ズレる）",
-   "verifiedAt": "2026-08-20",
+   "verifiedAt": "2026-08-11",
    "source": "https://faq.expy.jp/faq/show/281?category_id=98&site_domain=smart-ex",
    "cancel": {
     "refundable": true,
@@ -67,7 +67,7 @@
    "criticality": "replaceable",
    "note": "乗車1年前（前年同日）5:30から乗車1ヶ月前7:30まで。1ヶ月前の10時を待たずに今すぐ押さえられる。ただし座席数に限りがあり、早特・S Work席・車いす対応座席・お子さま連れ車両は対象外（スマートEX会員のみ）",
    "caution": "座席を選べません。列車番号・座席は乗車1ヶ月前8:00以降に確定してメールで通知され、席を選び直せるのは10:00から。並び席が要る家族連れは、席が離れて確定する可能性を織り込むこと",
-   "verifiedAt": "2026-08-20",
+   "verifiedAt": "2026-08-11",
    "source": "https://smart-ex.jp/reservation/useful/pre_time/",
    "cancel": {
     "refundable": true,
@@ -90,7 +90,7 @@
    "criticality": "replaceable",
    "note": "発売開始日（乗車1ヶ月前）の7日前5:30から発売開始日当日7:30まで。席番指定は不可。10時に張り付けない場合の保険",
    "caution": "申し込んでも予約が成立しない場合があります（発売手続時に満席なら不成立）。結果は発売開始日8:00以降にメール＝押さえられたか分かるのは当日の朝",
-   "verifiedAt": "2026-08-20",
+   "verifiedAt": "2026-08-11",
    "source": "https://smart-ex.jp/topics/detail/?id=738",
    "cancel": {
     "refundable": true,
