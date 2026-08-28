@@ -1,0 +1,3390 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>段取りたび ｜ 家族旅行の破綻検出 v0.2</title>
+<!-- オフライン完結が要件のため外部リソース（フォント等）は読まない -->
+<style>
+  :root{
+    --paper:#E9EEF1; --card:#FFF; --ink:#12202E; --muted:#5A6B7A;
+    --line:#D5DEE4; --soft:#F3F7F9;
+    --pass:#0E7C63; --edge:#D98200; --block:#C0453B; --measure:#2E5FD9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+    background:var(--paper); color:var(--ink); line-height:1.65;
+    padding:16px 12px 48px; font-size:14px;
+  }
+  .wrap{max-width:600px;margin:0 auto}
+  .mono{font-family:Consolas,"Courier New",monospace;font-variant-numeric:tabular-nums}
+
+  /* ── head ── */
+  .top{margin-bottom:18px}
+  .kicker{font-family:Consolas,monospace;font-size:11px;font-weight:600;
+    letter-spacing:.16em;color:var(--measure);text-transform:uppercase}
+  h1{font-size:23px;font-weight:700;letter-spacing:-.01em;margin-top:5px}
+  .sub{font-size:13px;color:var(--muted);margin-top:5px}
+
+  .score{display:flex;gap:7px;margin-top:14px}
+  .sc{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:9px 10px}
+  .sc .n{font-family:Consolas,monospace;font-size:21px;font-weight:600;line-height:1}
+  .sc .l{font-size:10.5px;color:var(--muted);margin-top:4px;font-weight:500}
+  .sc.p .n{color:var(--pass)} .sc.e .n{color:var(--edge)} .sc.b .n{color:var(--block)}
+
+  /* ── blocks ── */
+  .blk{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:15px;margin-top:14px}
+  .bh{display:flex;align-items:baseline;gap:8px;margin-bottom:13px;flex-wrap:wrap}
+  .bh .no{font-family:Consolas,monospace;font-size:11px;font-weight:600;
+    color:var(--measure);letter-spacing:.08em}
+  .bh h2{font-size:15px;font-weight:700}
+  .bh .hint{margin-left:auto;font-size:11px;color:var(--muted)}
+
+  /* ── buttons / inputs ── */
+  button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--line);
+    background:var(--soft);color:var(--ink);padding:6px 12px;font-size:12.5px;font-weight:600}
+  button.pri{background:var(--measure);border-color:var(--measure);color:#fff}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45;cursor:default}
+  input[type=text],input[type=number],input[type=date],input[type=time],select{
+    font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:7px;
+    padding:5px 7px;background:#fff;color:var(--ink)}
+  input[type=number]{width:64px} input[type=time]{width:92px}
+  textarea{font:inherit;font-size:12.5px;width:100%;min-height:110px;border:1px solid var(--line);
+    border-radius:9px;padding:9px;resize:vertical;background:#fff;color:var(--ink)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row+.row{margin-top:8px}
+  label.f{font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+
+  /* ── badges（status / source） ── */
+  .bdg{display:inline-block;font-size:10px;font-weight:700;border-radius:5px;
+    padding:1px 6px;vertical-align:1px}
+  .bdg.fix{background:#E2F3EC;color:var(--pass)}
+  .bdg.tmp{background:#F6E3C4;color:#8a5a17}
+  .bdg.tbd{background:#E5EAEE;color:var(--muted)}
+  .bdg.ng{background:#FBECEA;color:var(--block)}
+  .bdg.src{background:var(--soft);color:var(--muted);font-weight:500}
+
+  /* ── SIGNATURE: ruler ── */
+  .ruler{display:flex;gap:0;height:360px;margin:6px 0 4px;position:relative}
+  .rlabels{width:132px;position:relative}
+  .rbar{width:34px;position:relative;background:linear-gradient(#fff,#E3EAEF);
+    border:1px solid var(--line);border-radius:5px}
+  .rpeople{flex:1;position:relative}
+  .thr{position:absolute;left:0;right:0;height:0;display:flex;align-items:center;justify-content:flex-end}
+  .thr .tn{font-size:10px;color:var(--muted);text-align:right;line-height:1.3;white-space:nowrap;
+    padding-right:7px;transform:translateY(-50%)}
+  .thr .tv{font-family:Consolas,monospace;font-size:10px;font-weight:600;color:var(--ink)}
+  .tick{position:absolute;left:0;right:0;border-top:1px dashed #B9C6CF;height:0}
+  .tick.hot{border-top:1.5px solid var(--measure)}
+  .pmark{position:absolute;left:0;display:flex;align-items:center;gap:6px;
+    transform:translateY(-50%);transition:top .25s cubic-bezier(.4,0,.2,1)}
+  .pmark .dot{width:0;height:0;border-top:5px solid transparent;border-bottom:5px solid transparent;
+    border-left:8px solid var(--ink)}
+  .pmark .txt{font-size:11px;font-weight:600;white-space:nowrap}
+  .pmark .h{font-family:Consolas,monospace;font-size:10.5px;color:var(--muted);margin-left:3px}
+  .pmark.edge .dot{border-left-color:var(--edge)} .pmark.edge .txt{color:var(--edge)}
+
+  /* ── people ── */
+  .prow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+  .prow:first-of-type{border-top:0}
+  .prow .nm{width:96px;font-size:12.5px;font-weight:600}
+  .prow .nm span{display:block;font-size:10.5px;color:var(--muted);font-weight:400}
+  .prow input[type=range]{flex:1;accent-color:var(--measure);height:22px}
+  .prow .val{width:52px;text-align:right;font-family:Consolas,monospace;font-size:13px;font-weight:600}
+  .prow .del{border:0;background:none;color:var(--muted);font-size:14px;padding:2px 6px}
+  .naprow{display:flex;gap:8px;align-items:center;font-size:12px;padding:6px 0;border-top:1px dashed var(--line)}
+
+  /* ── chips（判定対象の切替） ── */
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .chip{border-radius:99px;padding:4px 12px;font-size:12px}
+  .chip.on{background:var(--measure);border-color:var(--measure);color:#fff}
+
+  /* ── verdict table ── */
+  .vt{border-top:1px solid var(--line)}
+  .vr{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)}
+  .vr .st{width:20px;text-align:center;font-weight:700;font-size:13px;flex:none}
+  .st.ok{color:var(--pass)} .st.ed{color:var(--edge)} .st.ng{color:#B4C0C9}
+  .vr .an{flex:1;font-size:12.5px;font-weight:500;line-height:1.4}
+  .vr .an em{display:block;font-style:normal;font-size:10.5px;color:var(--muted);font-weight:400}
+  .vr .lim{font-family:Consolas,monospace;font-size:11px;color:var(--muted);
+    background:var(--soft);border-radius:5px;padding:2px 6px;white-space:nowrap}
+  .vr.edge{background:#FDF4E6;margin:0 -15px;padding:9px 15px}
+  .vr.edge .lim{background:#F6E3C4;color:#8a5a17}
+
+  /* ── findings / booking ── */
+  .fd{display:flex;gap:10px;padding:11px 0;border-top:1px solid var(--line)}
+  .fd:first-of-type{border-top:0;padding-top:2px}
+  .fd .ic{width:22px;height:22px;border-radius:6px;flex:none;display:flex;
+    align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;margin-top:1px}
+  .ic.warn{background:var(--block)} .ic.note{background:var(--edge)}
+  .ic.good{background:var(--pass)} .ic.none{background:#B4C0C9} .ic.watch{background:var(--measure)}
+  .cdn{float:right;font-size:11px;font-weight:600;color:var(--block);background:#FBECEA;border-radius:5px;padding:1px 7px}
+  .fd .bd{flex:1}
+  .fd .ti{font-size:13px;font-weight:600}
+  .fd .dt{font-size:12px;color:var(--muted);margin-top:2px}
+  .fd .fix{font-size:12px;margin-top:5px;background:var(--soft);border-left:2.5px solid var(--measure);
+    padding:6px 9px;border-radius:0 5px 5px 0}
+  .fd.spof{background:#FBECEA;margin:0 -15px;padding:11px 15px;border-radius:8px}
+  .fd.spof .fix{border-left-color:var(--block)}
+  .ovl{font-size:12px;background:#FDF4E6;border:1px solid #F0DDBA;border-radius:8px;
+    padding:8px 11px;margin-bottom:10px}
+
+  /* ── derived plan ── */
+  .step{display:flex;gap:10px;padding:7px 0}
+  .step .t{font-family:Consolas,monospace;font-size:11.5px;font-weight:600;
+    color:var(--measure);width:52px;flex:none;padding-top:1px}
+  .step .b{font-size:12.5px}
+  .step .b em{font-style:normal;color:var(--muted);display:block;font-size:11px}
+
+  /* ── course（回り順） ── */
+  .cstep{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+  .cstep:first-of-type{border-top:0}
+  .cstep .t{font-family:Consolas,monospace;font-size:11.5px;font-weight:600;color:var(--measure);
+    width:82px;flex:none;padding-top:2px}
+  .cstep .b{flex:1;font-size:12.5px}
+  .cstep .b em{font-style:normal;color:var(--muted);display:block;font-size:11px;margin-top:1px}
+  .cstep.fix{background:var(--soft);margin:0 -15px;padding:8px 15px;border-radius:6px}
+  .cstep.fix .b{font-weight:600}
+  .cstep.nap .b{color:var(--muted)}
+  .path{font-size:12px;font-weight:600}
+  .budget{font-family:Consolas,monospace;font-size:11px;color:var(--muted);margin-top:3px}
+  .budget b{color:var(--ink)}
+  .budget.tight b{color:var(--block)}
+  .ci{display:inline-block;font-size:11.5px;border:1px solid var(--line);border-radius:99px;
+    padding:1px 9px;margin:4px 4px 0 0;background:#fff;white-space:nowrap}
+  .ci.all{border-color:#B6DED0} .ci.some{border-color:#F0DDBA;background:#FDF4E6}
+  .ci.switch{border-color:#D5DEE4;color:var(--muted)}
+  .ci .m{font-weight:700} .ci.all .m{color:var(--pass)} .ci.some .m{color:var(--edge)}
+  .ci.want{border-color:var(--measure);box-shadow:inset 2px 0 0 var(--measure)}
+  .wst{display:flex;gap:7px;align-items:baseline;font-size:11.5px;padding:3px 0}
+  .wst .s{font-weight:700;width:76px;flex:none;font-size:11px}
+  .wst .s.ok{color:var(--pass)} .wst .s.tight{color:var(--edge)} .wst .s.ng{color:var(--block)}
+  .dayhd{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0 6px;
+    padding:7px 11px;background:var(--measure);color:#fff;border-radius:8px}
+  .dayhd .n{font-weight:700;font-size:13px}
+  .dayhd .d{font-family:Consolas,monospace;font-size:12px;opacity:.9}
+  .dayhd .t{margin-left:auto;display:flex;gap:5px;align-items:center;font-size:11px}
+  .dayhd input[type=time]{padding:2px 5px;font-size:11.5px}
+  .avoid{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin-bottom:12px;background:var(--soft)}
+  .avoid .ah{font-size:12px;font-weight:600;margin-bottom:6px}
+  .avoid .ar{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+  .ax{border-radius:99px;padding:3px 11px;font-size:11.5px;background:#fff}
+  .ax.on{background:var(--block);border-color:var(--block);color:#fff}
+  .avoid .at{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--muted);margin-top:7px;flex-wrap:wrap}
+  .hz{font-size:11.5px;color:var(--muted);margin-top:7px;line-height:1.6}
+
+  /* ── paste cards ── */
+  .pcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;font-size:12.5px}
+  .pcard .ph{display:flex;align-items:center;gap:7px;font-weight:700;font-size:13px}
+  .pcard .ph .sp{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .pcard dl{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;margin-top:6px}
+  .pcard dt{color:var(--muted);font-size:11.5px}
+  .pcard dd{font-size:12px}
+  .slot{display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12px}
+  .slot .mono{color:var(--measure);font-weight:600}
+  .miss{color:var(--block);font-weight:600}
+
+  .empty{font-size:12.5px;color:var(--muted);padding:8px 0}
+  .note-sm{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.6}
+
+  footer{font-size:11px;color:var(--muted);text-align:center;margin-top:22px;line-height:1.7}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+  .tabs .tab{padding:6px 14px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:#fff;cursor:pointer;font-size:13px}
+  .tabs .tab.on{border-bottom:2px solid var(--pass);font-weight:700}
+  .tabs .tab.add{color:var(--muted)}
+  .tabs .tab .x{margin-left:8px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="kicker">dandori-tabi v0.2 — offline / no server / no LLM</div>
+    <h1>段取りたび｜家族旅行の破綻検出</h1>
+    <div class="sub">家族の制約を入れると、破綻する箇所が先に出る。候補は増やさない。</div>
+    <div class="score">
+      <div class="sc p"><div class="n" id="s-ok">–</div><div class="l">乗れる</div></div>
+      <div class="sc e"><div class="n" id="s-ed">–</div><div class="l">境界（あと少し）</div></div>
+      <div class="sc b"><div class="n" id="s-ng">–</div><div class="l">不可</div></div>
+    </div>
+  </div>
+
+  <!-- 00a TRIP TABS -->
+  <div class="tabs" id="trip-tabs"></div>
+
+  <!-- 00 FAMILY -->
+  <div class="blk">
+    <div class="bh"><span class="no">00</span><h2>家族</h2><span class="hint">身長は正確に。1cmで判定が変わります</span></div>
+    <div id="people"></div>
+    <div id="naps"></div>
+    <div class="row" style="margin-top:12px">
+      <input type="text" id="np-name" placeholder="名前" style="width:90px">
+      <input type="number" id="np-age" placeholder="年齢" min="0" max="120">
+      <input type="number" id="np-h" placeholder="身長cm" min="40" max="220" style="width:82px">
+      <label style="font-size:12px"><input type="checkbox" id="np-adult"> 大人</label>
+      <button id="np-add">追加</button>
+    </div>
+    <div class="row" style="margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <button id="btn-export" class="ghost">💾 ファイルへ書き出し</button>
+      <button id="btn-import" class="ghost">📂 ファイルから読み込み</button>
+      <input type="file" id="file-import" accept=".json" style="display:none">
+      <button id="btn-sample" class="ghost">🧪 サンプルを読み込む</button>
+      <button id="btn-clear" class="ghost">新規</button>
+    </div>
+    <div class="note-sm">この端末に自動保存します（保存できない環境では「ファイルへ書き出し」で trip.json を保管してください）。<span id="persist-state"></span></div>
+  </div>
+
+  <!-- 00b TRIP DATES / TRANSPORTS -->
+  <div class="blk">
+    <div class="bh"><span class="no">00b</span><h2>旅行日と交通手段</h2><span class="hint">未定のままでも動きます</span></div>
+    <div class="row">
+      <label class="f">開始<input type="date" id="d-start"></label>
+      <label class="f">終了<input type="date" id="d-end"></label>
+      <label class="f">旅行名<input type="text" id="d-name" placeholder="旅行1" style="width:120px"></label>
+      <label class="f">予算（円・任意）<input type="number" id="d-budget" min="0" step="1000" placeholder="未設定"></label>
+    </div>
+    <div class="row">
+      <label class="f">行きの手段
+        <select id="t-out-mode"><option value="">未定</option><option value="train">新幹線</option><option value="flight">飛行機</option><option value="bus">バス</option><option value="car">車</option></select></label>
+      <label class="f">行きの日付<input type="date" id="t-out-date"></label>
+      <label class="f">帰りの手段
+        <select id="t-ret-mode"><option value="">未定</option><option value="train">新幹線</option><option value="flight">飛行機</option><option value="bus">バス</option><option value="car">車</option></select></label>
+      <label class="f">帰りの日付<input type="date" id="t-ret-date"></label>
+    </div>
+    <div class="note-sm">手段で予約ルールが変わります（往復新幹線なら JR 解禁が行き・帰りの2件、リムジンバスの単一障害点は帰りが飛行機のときだけ）。</div>
+  </div>
+
+  <!-- 00c PASTE -->
+  <div class="blk">
+    <div class="bh"><span class="no">00c</span><h2>予定を貼る</h2><span class="hint">控えをそのまま。整形不要</span></div>
+    <textarea id="paste" placeholder="チケット購入画面・予約確認メール・便の控えなどを、そのまま貼り付けてください。&#10;読み取れた項目だけ埋まります（部分入力で動きます）。"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="btn-parse" class="pri">読み取る</button>
+      <span id="parse-msg" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div id="parsed"></div>
+  </div>
+
+  <!-- 01 RULER -->
+  <div class="blk">
+    <div class="bh"><span class="no">01</span><h2>身長ライン</h2><span class="hint">動かすと判定が変わります</span></div>
+    <div class="ruler">
+      <div class="rlabels" id="r-labels"></div>
+      <div class="rbar" id="r-bar"></div>
+      <div class="rpeople" id="r-people"></div>
+    </div>
+  </div>
+
+  <!-- 02 VERDICT -->
+  <div class="blk">
+    <div class="bh"><span class="no">02</span><h2>アトラクション判定</h2><span class="hint" id="v-for"></span></div>
+    <div class="chips" id="kid-chips"></div>
+    <div class="vt" id="verdict"></div>
+  </div>
+
+  <!-- 03 FINDINGS -->
+  <div class="blk">
+    <div class="bh"><span class="no">03</span><h2>検出された問題</h2></div>
+    <div id="findings"></div>
+  </div>
+
+  <!-- 04 COURSE -->
+  <div class="blk">
+    <div class="bh"><span class="no">04</span><h2>パーク内の回り順</h2><span class="hint" id="c-day"></span></div>
+    <div class="row">
+      <label class="f">1件あたりの待ち（仮定・分）<input type="number" id="c-wait" min="5" max="180" step="5"></label>
+      <span class="note-sm" id="c-days" style="margin-top:0"></span>
+    </div>
+    <div id="want"></div>
+    <div id="avoid"></div>
+    <div id="course"></div>
+  </div>
+
+  <!-- 05 DERIVED -->
+  <div class="blk">
+    <div class="bh"><span class="no">05</span><h2>逆算された締切</h2><span class="hint">帰りの便から</span></div>
+    <div id="derived"></div>
+  </div>
+
+  <!-- 06 BOOKING -->
+  <div class="blk">
+    <div class="bh"><span class="no">06</span><h2>予約解禁カレンダー</h2><span class="hint">旅行日から逆算</span></div>
+    <div id="overlaps"></div>
+    <div id="booking"></div>
+  </div>
+
+  <!-- 07 TBD -->
+  <div class="blk">
+    <div class="bh"><span class="no">07</span><h2>これから決めること</h2><span class="hint">未定の項目が自動で流れてきます</span></div>
+    <div id="undecided"></div>
+  </div>
+
+  <!-- 08 SHARE -->
+  <div class="blk">
+    <div class="bh"><span class="no">08</span><h2>共有</h2><span class="hint">画像1枚で送れます</span></div>
+    <div class="row">
+      <button id="btn-image" class="pri">🖼 画像を書き出す</button>
+      <label style="font-size:12px"><input type="checkbox" id="show-price"> 金額を表示する（既定は非表示）</label>
+    </div>
+    <canvas id="share-canvas" style="display:none"></canvas>
+  </div>
+
+  <footer>判定材料であり保証ではありません。身長制限・予約規則は必ず公式の最新情報で確認してください。</footer>
+</div>
+
+<script>
+/* =入れ替え禁止= 正は data/*.json。scripts/build.py が埋め込む */
+/* ==DATA:BEGIN== */
+window.DANDORI_DATA = {
+ "attractions": {
+  "_comment": "公式『身長制限』ページで検証済み（verifiedAt/source参照）。minHeight=単独利用の下限cm / minHeightWithAdult=付き添い者同伴時の下限cm（null=同伴なら身長制限なし）/ maxHeight=上限cm。schemaVersion 2: 旧minHeightは実質『同伴時の値』だったため意味を再定義（単独値）した破壊的変更。schemaVersion 4: childSwitch（保護者交代の可否）/ durationMin / kind（ride|show|play）を追加し、ユニバーサル・ワンダーランド等12件を追加。schemaVersion 5: reserveRide（よやくのり対象）/ closed・closedNote（公式の休止情報）を追加し、全件を公式サイト（身長制限一覧・チャイルドスイッチ一覧・各アトラクション個別ページ・休止情報）で 2026-08-29 に再検証した。closed:true は solver が判定・回り順の対象から外す（配列からは消さないので券の突合には残る）",
+  "_weather_comment": "indoor=乗り物と待機列がおおむね屋内（雨でも濡れにくい）／soaks=乗ると水を浴びる。soaks は公式の「水に濡れる可能性あり」タグで検証済（verifiedAtSoaks）。indoor は公式サイトに該当する属性・記述が無く検証できない（verifiedAtWeather:null のまま）ため、既存値は旧セッションの一般知識のまま残してある。待機列の屋根は現地で見るしかない",
+  "verifiedAtWeather": null,
+  "schemaVersion": 5,
+  "park": "USJ",
+  "verifiedAt": "2026-08-29",
+  "source": "https://www.usj.co.jp/web/ja/jp/attractions/requirements/height-restriction",
+  "attractions": [
+   {
+    "id": "kart",
+    "indoor": true,
+    "soaks": false,
+    "name": "マリオカート ～クッパの挑戦状～",
+    "short": "マリオカート",
+    "area": "マリオ",
+    "minHeight": 122,
+    "minHeightWithAdult": 107,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 5,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "yoshi",
+    "indoor": false,
+    "soaks": false,
+    "name": "ヨッシー・アドベンチャー",
+    "short": "ヨッシー",
+    "area": "マリオ",
+    "minHeight": 122,
+    "minHeightWithAdult": 92,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 5,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "donk",
+    "indoor": true,
+    "soaks": true,
+    "name": "ドンキーコングのクレイジー・トロッコ",
+    "short": "トロッコ",
+    "area": "マリオ",
+    "minHeight": 122,
+    "minHeightWithAdult": 107,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 2,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "fj",
+    "indoor": true,
+    "soaks": false,
+    "name": "ハリー・ポッター・アンド・ザ・フォービドゥン・ジャーニー",
+    "short": "フォービドゥン",
+    "area": "ハリポタ",
+    "minHeight": 122,
+    "minHeightWithAdult": 122,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 5,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "hippo",
+    "indoor": false,
+    "soaks": false,
+    "name": "フライト・オブ・ザ・ヒッポグリフ",
+    "short": "ヒッポグリフ",
+    "area": "ハリポタ",
+    "minHeight": 122,
+    "minHeightWithAdult": 92,
+    "maxHeight": 195,
+    "childSwitch": true,
+    "durationMin": 2,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "jp",
+    "indoor": false,
+    "soaks": true,
+    "name": "ジュラシック・パーク・ザ・ライド",
+    "short": "ジュラシック",
+    "area": "ジュラシック",
+    "minHeight": 122,
+    "minHeightWithAdult": 107,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 7,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "mini",
+    "indoor": true,
+    "soaks": false,
+    "name": "ミニオン・ハチャメチャ・ライド",
+    "short": "ミニオン",
+    "area": "ミニオン",
+    "minHeight": 122,
+    "minHeightWithAdult": 102,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 25,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "jaws",
+    "indoor": false,
+    "soaks": true,
+    "name": "ジョーズ",
+    "short": "ジョーズ",
+    "area": "アミティ",
+    "minHeight": 122,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "notes": "公式原文「乗り物にお一人で座って安定した姿勢を保てる方が利用できます。小さなお子さまも、お一人で座る必要があります。」（膝上不可）",
+    "childSwitch": true,
+    "durationMin": 7,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "hd",
+    "indoor": false,
+    "soaks": false,
+    "name": "ハリウッド・ドリーム・ザ・ライド",
+    "short": "ハリドリ",
+    "area": "ハリウッド",
+    "minHeight": 132,
+    "minHeightWithAdult": 132,
+    "maxHeight": null,
+    "childSwitch": true,
+    "durationMin": 3,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "fd",
+    "indoor": false,
+    "soaks": false,
+    "name": "ザ・フライング・ダイナソー",
+    "short": "ダイナソー",
+    "area": "ジュラシック",
+    "minHeight": 132,
+    "minHeightWithAdult": 132,
+    "maxHeight": 198,
+    "childSwitch": true,
+    "durationMin": 3,
+    "kind": "ride",
+    "reserveRide": false
+   },
+   {
+    "id": "snoopy_ace",
+    "name": "スヌーピーのフライング・エース・アドベンチャー",
+    "short": "スヌーピーエース",
+    "area": "ワンダーランド",
+    "minHeight": 122,
+    "minHeightWithAdult": 92,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": true,
+    "durationMin": 1,
+    "kind": "ride",
+    "notes": "よやくのり対象",
+    "reserveRide": true
+   },
+   {
+    "id": "flying_snoopy",
+    "name": "フライング・スヌーピー",
+    "short": "フライングスヌーピー",
+    "area": "ワンダーランド",
+    "minHeight": 122,
+    "minHeightWithAdult": 92,
+    "maxHeight": null,
+    "indoor": null,
+    "soaks": false,
+    "childSwitch": true,
+    "durationMin": 2,
+    "kind": "ride",
+    "reserveRide": true,
+    "notes": "よやくのり対象"
+   },
+   {
+    "id": "kitty_cup",
+    "name": "ハローキティのカップケーキ・ドリーム",
+    "short": "キティカップ",
+    "area": "ワンダーランド",
+    "minHeight": 122,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": true,
+    "durationMin": 2,
+    "kind": "ride",
+    "notes": "公式原文「乗り物にお一人で座って安定した姿勢を保てる方が利用できます。」＋「身長122cm未満のお子さまには、付き添い者が必要です。」＝身長の下限ではなく着座条件",
+    "reserveRide": false
+   },
+   {
+    "id": "mini_mission",
+    "name": "ミニオン・ハチャメチャ・ミッション ～大悪党への道～",
+    "short": "ハチャメチャミッション",
+    "area": "ミニオン",
+    "minHeight": 122,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": true,
+    "durationMin": 7,
+    "kind": "ride",
+    "notes": "2025年7月オープン。シューティング型",
+    "reserveRide": false
+   },
+   {
+    "id": "mini_ice",
+    "name": "ミニオン・ハチャメチャ・アイス",
+    "short": "ハチャメチャアイス",
+    "area": "ミニオン",
+    "minHeight": 122,
+    "minHeightWithAdult": 92,
+    "maxHeight": null,
+    "indoor": null,
+    "soaks": true,
+    "childSwitch": true,
+    "durationMin": 1.5,
+    "kind": "ride",
+    "reserveRide": true,
+    "notes": "よやくのり対象。公式「水に濡れる可能性あり」"
+   },
+   {
+    "id": "space",
+    "name": "スペース・ファンタジー・ザ・ライド",
+    "short": "スペースファンタジー",
+    "area": "ハリウッド",
+    "minHeight": 122,
+    "minHeightWithAdult": 102,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": true,
+    "durationMin": 10,
+    "kind": "ride",
+    "reserveRide": false,
+    "closed": true,
+    "closedNote": "休止期間：2025年6月2日～当面の間（公式「ショー＆アトラクション休止情報」2026年8月/9月/10月以降の全タブに掲載）"
+   },
+   {
+    "id": "shrek",
+    "name": "シュレック4-Dアドベンチャー／セサミストリート4-Dムービーマジック",
+    "short": "4-Dシアター",
+    "area": "ハリウッド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": true,
+    "childSwitch": true,
+    "durationMin": 20,
+    "kind": "show",
+    "reserveRide": false,
+    "closed": true,
+    "closedNote": "シュレック4-D・セサミ4-Dとも休止期間：2026年1月8日～当面の間（同上）",
+    "notes": "シュレック4-D／セサミ4-Dの交互上映。公式「水に濡れる可能性あり」"
+   },
+   {
+    "id": "monster",
+    "name": "ユニバーサル・モンスター・ライブ・ロックンロール・ショー",
+    "short": "モンスターライブ",
+    "area": "ハリウッド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": false,
+    "durationMin": 30,
+    "kind": "show",
+    "reserveRide": false
+   },
+   {
+    "id": "sing",
+    "name": "シング・オン・ツアー",
+    "short": "シング",
+    "area": "ハリウッド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": false,
+    "durationMin": 20,
+    "kind": "show",
+    "reserveRide": false
+   },
+   {
+    "id": "conan",
+    "name": "名探偵コナン4-Dライブ・ショー",
+    "short": "コナン4-D",
+    "area": "ニューヨーク",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": true,
+    "childSwitch": true,
+    "durationMin": 30,
+    "kind": "show",
+    "notes": "2026-08-29時点で公式サイトに掲載され開催中。終了日の記載は無い（期間限定かどうかは公式に明記なし）",
+    "reserveRide": false
+   },
+   {
+    "id": "waterworld",
+    "name": "ウォーターワールド",
+    "short": "ウォーターワールド",
+    "area": "ウォーターワールド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": null,
+    "soaks": true,
+    "childSwitch": false,
+    "durationMin": 20,
+    "kind": "show",
+    "notes": "公式「水に濡れる可能性あり」。座席位置ごとの濡れ方は公式に記載なし。座席指定不要のショーのためチャイルドスイッチ対象外（公式一覧に無い）",
+    "reserveRide": false
+   },
+   {
+    "id": "kitty_ribbon",
+    "name": "ハローキティのリボン・コレクション",
+    "short": "キティリボン",
+    "area": "ワンダーランド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": null,
+    "soaks": false,
+    "childSwitch": false,
+    "reserveRide": false,
+    "durationMin": null,
+    "kind": "play",
+    "notes": "公式「身長制限なし」。所要時間の記載なし。チャイルドスイッチ一覧に無い"
+   },
+   {
+    "id": "snoopy_studio",
+    "name": "スヌーピー・スタジオ",
+    "short": "スヌーピースタジオ",
+    "area": "ワンダーランド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": true,
+    "soaks": false,
+    "childSwitch": false,
+    "reserveRide": false,
+    "durationMin": null,
+    "kind": "play",
+    "notes": "公式エリア紹介に「雨の日でも思いっきり遊べる」と明記＝雨天の逃げ場。身長制限なし"
+   },
+   {
+    "id": "wonderland_show",
+    "name": "ユニバーサル・ワンダーランド ～レッツ・スマイル・トゥギャザー！～",
+    "short": "ワンダーランドショー",
+    "area": "ワンダーランド",
+    "minHeight": null,
+    "minHeightWithAdult": null,
+    "maxHeight": null,
+    "indoor": null,
+    "soaks": false,
+    "childSwitch": false,
+    "reserveRide": false,
+    "durationMin": null,
+    "kind": "show",
+    "notes": "ストリート・ショー。身長制限なし・所要時間の記載なし。セサミの仲間の出演は2026-05-10終了"
+   }
+  ],
+  "_todo": [
+   "解決済(2026-08-29): ヨッシー・アドベンチャーの同伴下限は公式で 92cm と再確認した（参考記事の 86cm が誤り）",
+   "解決済(2026-08-29): マリオカート／ヨッシーは公式チャイルドスイッチ一覧に掲載＝対応。参考記事の「未対応」が誤り",
+   "TODO(verify): indoor は公式サイトに属性・記述が無く検証できなかった（ヨッシーの待機列・ハローキティのカップケーキを含む全件）。現地で待機列の屋根を見て埋めること。スヌーピー・スタジオのみ公式の「雨の日でも思いっきり遊べる」を根拠に true",
+   "TODO(verify): ジュラシック／ジョーズ／ウォーターワールドの「濡れる程度」と座席位置ごとの差は公式に記載が無い。公式は可否（水に濡れる可能性あり）だけ",
+   "TODO(recheck): 休止中3件（space=スペース・ファンタジー、shrek=シュレック4-D／セサミ4-D）は「当面の間」で再開日が未定。来園前に休止情報を再確認すること",
+   "TODO(recheck): 名探偵コナン4-Dは 2026-08-29 時点で開催中だが終了日の記載が無い。来園前に再確認すること",
+   "TODO(verify): よやくのりは公式に対象一覧のページが無く、各アトラクションの「サービス」欄で判定した（park 全 45 ページを走査して3件）。増減しうる"
+  ],
+  "verifiedAtAdded": "2026-08-29",
+  "verifiedAtSoaks": "2026-08-29"
+ },
+ "bookingRules": {
+  "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）。schemaVersion 4: offset* は『窓の開き』であって締切ではない。閉じる側を end{offsetMonths,offsetDays,at} で持つ（省略時は anchor 当日＝乗車日・搭乗日・来園日に閉じる）。解禁済み・未確保は『期限切れ』ではなく『受付中』。pro: watch（実監視の宿・日付）と watchOnly ルールを持つ。①の配布物へは scripts/build.py が除外して埋め込む",
+  "schemaVersion": 4,
+  "rules": [
+   {
+    "id": "jal",
+    "label": "飛行機（JAL国内線）",
+    "anchor": "flight",
+    "carrier": "JAL",
+    "offsetMonths": 0,
+    "offsetDays": -360,
+    "at": "00:00",
+    "mode": "exact",
+    "criticality": "singlePoint",
+    "note": "搭乗日の360日前 0:00から",
+    "cancel": {
+     "refundable": "partial",
+     "note": "運賃種別で大きく変わる。割引運賃ほど取消手数料が重い。購入前に運賃規則を確認"
+    }
+   },
+   {
+    "id": "ana",
+    "label": "飛行機（ANA国内線）",
+    "anchor": "flight",
+    "carrier": "ANA",
+    "offsetMonths": 0,
+    "offsetDays": -355,
+    "at": "09:00",
+    "mode": "exact",
+    "criticality": "singlePoint",
+    "note": "355日前。2026/5/19搭乗分以降は9:00（それ以前は9:30）",
+    "cancel": {
+     "refundable": "partial",
+     "note": "運賃種別で大きく変わる。割引運賃ほど取消手数料が重い。購入前に運賃規則を確認"
+    }
+   },
+   {
+    "id": "jr",
+    "label": "新幹線 指定席",
+    "anchor": "train",
+    "offsetMonths": -1,
+    "offsetDays": 0,
+    "at": "10:00",
+    "mode": "exact",
+    "criticality": "singlePoint",
+    "note": "乗車1ヶ月前の同日10時＝きっぷの発売開始。席番を選べるのはここから（1年前予約の席の変更も10時以降）。★暦月で引くこと（-30日だと1日ズレる）",
+    "verifiedAt": "2026-08-11",
+    "source": "https://faq.expy.jp/faq/show/281?category_id=98&site_domain=smart-ex",
+    "cancel": {
+     "refundable": true,
+     "note": "出発前なら330円。指定席の変更は1回無料＝先に押さえて損がない"
+    }
+   },
+   {
+    "id": "smartex1y",
+    "label": "スマートEX 1年前予約",
+    "anchor": "train",
+    "offsetMonths": -12,
+    "offsetDays": 0,
+    "at": "05:30",
+    "end": {
+     "offsetMonths": -1,
+     "offsetDays": 0,
+     "at": "07:30"
+    },
+    "mode": "window",
+    "criticality": "replaceable",
+    "note": "乗車1年前（前年同日）5:30から乗車1ヶ月前7:30まで。1ヶ月前の10時を待たずに今すぐ押さえられる。ただし座席数に限りがあり、早特・S Work席・車いす対応座席・お子さま連れ車両は対象外（スマートEX会員のみ）",
+    "caution": "座席を選べません。列車番号・座席は乗車1ヶ月前8:00以降に確定してメールで通知され、席を選び直せるのは10:00から。並び席が要る家族連れは、席が離れて確定する可能性を織り込むこと",
+    "verifiedAt": "2026-08-11",
+    "source": "https://smart-ex.jp/reservation/useful/pre_time/",
+    "cancel": {
+     "refundable": true,
+     "note": "予約完了と同時に決済。列車・座席が未確定でも払戻には手数料がかかる"
+    }
+   },
+   {
+    "id": "smartex",
+    "label": "スマートEX 事前申込",
+    "anchor": "train",
+    "offsetMonths": -1,
+    "offsetDays": -7,
+    "at": "05:30",
+    "end": {
+     "offsetMonths": -1,
+     "offsetDays": 0,
+     "at": "07:30"
+    },
+    "mode": "window",
+    "criticality": "replaceable",
+    "note": "発売開始日（乗車1ヶ月前）の7日前5:30から発売開始日当日7:30まで。席番指定は不可。10時に張り付けない場合の保険",
+    "caution": "申し込んでも予約が成立しない場合があります（発売手続時に満席なら不成立）。結果は発売開始日8:00以降にメール＝押さえられたか分かるのは当日の朝",
+    "verifiedAt": "2026-08-11",
+    "source": "https://smart-ex.jp/topics/detail/?id=738",
+    "cancel": {
+     "refundable": true,
+     "note": "出発前まで払戻可（手数料310円〜）"
+    }
+   },
+   {
+    "id": "hotel",
+    "label": "ホテル",
+    "anchor": "start",
+    "offsetMonths": 0,
+    "offsetDays": -365,
+    "at": null,
+    "mode": "unknown",
+    "criticality": "replaceable",
+    "note": "解禁日は非公表。一律ルールなし（3ヶ月〜1年）。推定せず365日前から監視する",
+    "observedOpenAt": null,
+    "confidence": null,
+    "anchorType": "unknown",
+    "cancel": {
+     "refundable": "unknown",
+     "note": "プランごとに規定が違う。無料キャンセル期限を控えで確認（先押さえが無リスクかはここで決まる）"
+    }
+   },
+   {
+    "id": "parkpass",
+    "label": "パークチケット",
+    "anchor": "start",
+    "offsetMonths": 0,
+    "offsetDays": 0,
+    "at": null,
+    "mode": "asap",
+    "criticality": "singlePoint",
+    "note": "変動価格。発売後も需要で値上がり＝待つほど損。混雑日は売切れる",
+    "cancel": {
+     "refundable": false,
+     "note": "日付指定券は原則キャンセル・変更不可"
+    }
+   },
+   {
+    "id": "express",
+    "label": "エクスプレス・パス",
+    "anchor": "start",
+    "offsetMonths": 0,
+    "offsetDays": 0,
+    "at": null,
+    "mode": "asap",
+    "criticality": "replaceable",
+    "note": "通常パスより先に売り切れる",
+    "cancel": {
+     "refundable": false,
+     "note": "キャンセル・変更不可"
+    }
+   },
+   {
+    "id": "restaurant",
+    "label": "レストラン優先案内",
+    "anchor": "start",
+    "offsetMonths": -1,
+    "offsetDays": 0,
+    "at": "11:00",
+    "end": {
+     "offsetMonths": 0,
+     "offsetDays": -1,
+     "at": null
+    },
+    "mode": "window",
+    "criticality": "replaceable",
+    "note": "来場1ヶ月前11:00〜前日",
+    "cancel": {
+     "refundable": "unknown",
+     "note": "店舗・コースにより規定が違う。予約時に確認"
+    }
+   },
+   {
+    "id": "limobus",
+    "label": "空港リムジンバス",
+    "anchor": "flight",
+    "offsetMonths": 0,
+    "offsetDays": 0,
+    "at": null,
+    "mode": "none",
+    "criticality": "singlePoint",
+    "appliesWhen": {
+     "returnMode": "flight"
+    },
+    "note": "全便自由席・先着順。予約制度が無い＝リスクが当日に先送りされているだけ",
+    "fallback": {
+     "route": "JR経由（ゆめ咲線→大阪→伊丹）",
+     "extraMinutes": 35,
+     "decisionRule": "帰りの便から逆算し、代替経路でも間に合う最終時刻を判断点とする"
+    }
+   }
+  ]
+ },
+ "exposure": {
+  "_verified": false,
+  "_note": "エリアの屋外率は未設定。推測で埋めない（CLAUDE.md §8）。実旅行で観測してから入れる。null のままでも定性の指摘は出る。",
+  "areas": {
+   "マリオ": null,
+   "ハリポタ": null,
+   "ジュラシック": null,
+   "ミニオン": null,
+   "アミティ": null,
+   "ハリウッド": null
+  },
+  "legModes": {
+   "walk_open": 1.0,
+   "wait_open": 1.0,
+   "walk_covered": 0.15,
+   "wait_covered": 0.2,
+   "train": 0.0,
+   "indoor": 0.0
+  }
+ },
+ "layout": {
+  "_comment": "パーク内の回り順（F6）が使う地理データ。ring は入口エリアから時計回りの環状順で、toNextMin は『次のエリアまでの徒歩分』（最後の要素は先頭へ戻る分）。逆回りの徒歩分は一つ手前の toNextMin を使う。待ち時間はここに持たない — 当日次第で推定できないため、assumeWaitMin は『仮定値』として画面に明示したうえで件数を数えるためだけに使う",
+  "schemaVersion": 1,
+  "park": "USJ",
+  "verifiedAt": null,
+  "source": "https://www.usj.co.jp/web/ja/jp/park-guide",
+  "entrance": "ハリウッド",
+  "openDefault": "09:00",
+  "closeDefault": null,
+  "assumeWaitMin": 45,
+  "_todo": [
+   "TODO(verify): toNextMin は公式マップからの概算で実地計測していない（verifiedAt:null）。歩測して置き換えること。子連れの実速度は概算より遅くなる",
+   "TODO(verify): openDefault は仮の既定値。開園時刻は日によって変わるので、画面から当日の値を入れて上書きする",
+   "TODO(verify): closeDefault は null（不明）のまま。閉園時刻は日によって変わるため既定値を置かない",
+   "TODO(verify): ワンダーランドの環内の位置（マリオとミニオンの間）と徒歩分3分は未実測",
+   "確認済(2026-08-29): ring の10エリアは公式「エリア紹介」の掲載エリアと一致する。ただし並び順・toNextMin は未検証のまま",
+   "TODO(verify): ハリポタの gate（エリア入場整理券）は公式に記載を確認できなかった。公式が整理券に言及しているのはスーパー・ニンテンドー・ワールドのみ。gate:true は旧データのまま残してある",
+   "確認済(2026-08-29): 2026年の営業時間は 9/20=08:00〜22:00、9/21=09:00〜21:30、9/22=09:00〜21:30（公式カレンダー）。日によって変わるので既定値は据え置き"
+  ],
+  "_reentry_comment": "パークの『再入場』は、エリア入場整理券の『再入場不可』とは別物。こちらは券種の話で、退場したら同じ券では戻れない",
+  "reentry": {
+   "allowed": false,
+   "annualPassOnly": true,
+   "passPattern": "年間パス|年パス|アニュアル|annual",
+   "note": "スタジオ・パス（1デイ／1.5デイ／2デイ等）では再入場できません。年間パスは退場時に出口のクルーへ提示し、再入場スタンプを受ければ戻れます",
+   "exceptions": [
+    "混雑期（GW等）に一般ゲストも再入場できる日があります",
+    "学校団体は申込時の申請で認められます（券面が再入場不可でも可）",
+    "当日パーク内の年間パスセンターで年間パスへアップグレードすれば戻れます"
+   ],
+   "verifiedAt": null,
+   "source": "https://castel.jp/p/2827",
+   "_todo": "TODO(verify): 公式のよくあるご質問・利用規約で要確認（公式ページはJS描画で機械取得できず未検証）。運用は日・券種で変わる"
+  },
+  "_hazards_comment": "『通りたくない』の候補を先に出すためのデータ。避けるかどうかを決めるのは利用者で、ここは提案にすぎない（constraints の avoid が正）。areas は ring の area 名で書く",
+  "hazards": [
+   {
+    "id": "hhn",
+    "label": "ハロウィーン・ホラー・ナイト（ストリート・ゾンビ）",
+    "areas": [
+     "ハリウッド",
+     "ニューヨーク",
+     "サンフランシスコ"
+    ],
+    "from": "18:00",
+    "to": null,
+    "season": {
+     "from": "2026-09-11",
+     "to": "2026-11-08"
+    },
+    "safeAreas": [
+     "ワンダーランド"
+    ],
+    "note": "公式「ストリート・ゾンビ」は 18:00〜パーククローズ（2026年10月13日のみ 18:30〜）。公式マップで色分けされているのは ゾンビ出現エリア／セーフティ・エリア／セーフティ・ルート の3つで、セーフティ・エリアは1か所だけ。エリア名は公式に文字で書かれておらず、地図上の位置からユニバーサル・ワンダーランド一帯と読んだ（当日は公式アプリのマップで確認すること）。出現エリアはハリウッド／ニューヨーク／サンフランシスコの街路とラグーン周辺に引かれている",
+    "verifiedAt": "2026-08-29",
+    "source": "https://www.usj.co.jp/web/ja/jp/events/halloween-extreme-autumn-2026/halloween-horror-nights/street-zombies",
+    "_todo": "TODO(verify): セーフティ・エリアのエリア名は公式が文字で書いていないため、地図画像の位置から推定した（ハリウッド・ドリーム・ザ・ライドの東隣＝ユニバーサル・ワンダーランド）。範囲・時刻は年により変わる",
+    "ageAdvisory": "公式: 一部暴力的なシーンやグロテスクな表現があるため5歳以下には推奨しない。12歳以下の体験には保護者の同意が必要"
+   }
+  ],
+  "ring": [
+   {
+    "area": "ハリウッド",
+    "names": [
+     "ハリウッド・エリア"
+    ],
+    "toNextMin": 4
+   },
+   {
+    "area": "ニューヨーク",
+    "names": [
+     "ニューヨーク・エリア"
+    ],
+    "toNextMin": 3
+   },
+   {
+    "area": "サンフランシスコ",
+    "names": [
+     "サンフランシスコ・エリア"
+    ],
+    "toNextMin": 4
+   },
+   {
+    "area": "ジュラシック",
+    "names": [
+     "ジュラシック・パーク"
+    ],
+    "toNextMin": 4
+   },
+   {
+    "area": "アミティ",
+    "names": [
+     "アミティ・ビレッジ"
+    ],
+    "toNextMin": 3
+   },
+   {
+    "area": "ウォーターワールド",
+    "names": [
+     "ウォーターワールド"
+    ],
+    "toNextMin": 6
+   },
+   {
+    "area": "ハリポタ",
+    "names": [
+     "ウィザーディング・ワールド・オブ・ハリー・ポッター",
+     "ハリー・ポッター・エリア"
+    ],
+    "toNextMin": 6,
+    "gate": true,
+    "gateNote": "繁忙期はエリア入場整理券が必要になる場合があります（当日アプリで取得）"
+   },
+   {
+    "area": "マリオ",
+    "names": [
+     "スーパー・ニンテンドー・ワールド",
+     "ニンテンドー・ワールド"
+    ],
+    "toNextMin": 3,
+    "gate": true,
+    "gateNote": "混雑時はエリア入場整理券／抽選が必要（当日アプリで取得）。取れないとエリアに入れません"
+   },
+   {
+    "area": "ワンダーランド",
+    "names": [
+     "ユニバーサル・ワンダーランド"
+    ],
+    "toNextMin": 3
+   },
+   {
+    "area": "ミニオン",
+    "names": [
+     "ミニオン・パーク"
+    ],
+    "toNextMin": 4
+   }
+  ],
+  "_reserveRide_comment": "よやくのり＝対象アトラクションの乗車時間を指定予約する無料のe整理券。対象は attractions.usj.json の reserveRide:true",
+  "reserveRide": {
+   "howToGet": "公式アプリ（要最新版・iOS17.0以上／Android9.0以上）。人数分のスタジオ・パス／年間パスをQRコードでアプリに登録してから取得する。QRが読み取れない場合はパーク内の利用施設ごとの発券所で取得する",
+   "whereToGet": "パーク内でのみ取得できる（入場ゲートで入場券が正しく読み取れていないと取得できない）",
+   "limit": "枚数の上限ではなく「取得した券面の案内予定時間を過ぎるまで、次の取得はできない」＝同時に持てるのは1枚。定員に達すると取得できないことがある",
+   "notes": [
+    "取得後の時間・枚数・対象アトラクションの変更およびキャンセルはできない",
+    "スタジオ・パスを持たない3歳以下の子どもの分も取得できる",
+    "グループは全員分のスタジオ・パスを登録して発券する",
+    "対象アトラクションはよやくのりを取らずに待ち列に並んで利用することもできる",
+    "利用前に公式アプリをアンインストールすると取得済みのe整理券は無効になる"
+   ],
+   "verifiedAt": "2026-08-29",
+   "source": "https://www.usj.co.jp/web/ja/jp/enjoy/numbered-ticket/yoyakunori"
+  }
+ }
+};
+/* ==DATA:END== */
+</script>
+
+<script>
+/* =入れ替え禁止= 正は src/*.js。scripts/build.py が埋め込む */
+/* ==LIB:BEGIN== */
+/* 段取りたび — 貼り付けパーサー（tests/fixtures/parse_test.py と同一挙動を保つこと）
+   ブラウザ・Node 両対応。globalThis.DandoriParser に公開する。 */
+(function (g) {
+  'use strict';
+
+  /* ★順序厳守：™®はNFKC「前」に除去（後だと"TM"化して名前突合が全滅する） */
+  function norm(s) {
+    s = s.replace(/™/g, '').replace(/®/g, '');
+    s = s.normalize('NFKC');
+    s = s.replace(/～/g, '~').replace(/〜/g, '~');
+    return s.replace(/　/g, ' ');
+  }
+
+  const DATE_PATTERNS = [
+    [/(\d{4})年(\d{1,2})月(\d{1,2})日/g, '和式'],
+    [/(\d{4})\/(\d{1,2})\/(\d{1,2})/g, 'スラッシュ'],
+  ];
+
+  function dates(t) {
+    const out = [];
+    for (const [pat, label] of DATE_PATTERNS) {
+      pat.lastIndex = 0;
+      let m;
+      while ((m = pat.exec(t)) !== null) {
+        const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+        out.push([
+          `${String(y).padStart(4, '0')}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+          label, m[0],
+        ]);
+      }
+    }
+    return out;
+  }
+
+  function times(t) {
+    return (t.match(/\d{1,2}:\d{2}/g) || []);
+  }
+
+  /* 金額。書き出し時は既定で非表示にするが、抽出はしておく */
+  function price(t) {
+    const m = t.match(/[¥￥]\s*([\d,]+)|([\d,]+)\s*円/);
+    if (!m) return null;
+    return Number((m[1] || m[2]).replace(/,/g, ''));
+  }
+
+  function parseFlight(raw) {
+    const t = norm(raw);
+    const dd = dates(t);
+    const legs = t.match(/(\S+?)(\d{1,2}:\d{2})発\s*(\S+?)(\d{1,2}:\d{2})着/);
+    const seats = t.match(/座席番号[:：]\s*([\w.]+)/);
+    const cabin = t.match(/クラス\s*([A-Z])/);
+    const flight = t.match(/([A-Z]{2,3}\d{1,4})便/);   // ★3文字コード対応（2文字マッチだとJALxxxがALxxxに化けた実バグ）
+    return {
+      type: 'flight',
+      date: dd.length ? dd[0][0] : null,
+      flightNo: flight ? flight[1] : null,
+      from: legs ? legs[1] : null, depart: legs ? legs[2] : null,
+      to: legs ? legs[3] : null, arrive: legs ? legs[4] : null,
+      cabin: cabin ? 'クラス' + cabin[1] : null,
+      seats: seats ? seats[1].split('.') : [],
+      price: price(t),
+    };
+  }
+
+  function parseUsj(raw) {
+    const t = norm(raw);
+    const tickets = [];
+    let cur = null, mode = null;
+    for (let line of t.split('\n')) {
+      line = line.trim();
+      if (!line) continue;
+      if (line.includes('パス') && !line.includes('入場日') && !line.includes('対象')) {
+        cur = { name: line, date: null, entryTime: null, no: null, fixed: [], free: [], price: price(line) };
+        tickets.push(cur); mode = null; continue;
+      }
+      if (cur === null) continue;
+      if (line.startsWith('入場日')) {
+        const dd = dates(line);
+        cur.date = dd.length ? dd[0][0] : null; continue;
+      }
+      if (line.startsWith('入場時間')) {
+        const tt = times(line);
+        cur.entryTime = tt.length ? tt[0] : null; continue;
+      }
+      if (line.startsWith('チケット番号')) {
+        const m = line.match(/(P:[\d.]+)/);
+        cur.no = m ? m[1] : null; continue;
+      }
+      if (line.includes('時間指定あり')) { mode = 'fixed'; continue; }
+      if (line.includes('時間指定なし')) { mode = 'free'; continue; }
+      if (mode === 'fixed') {
+        const m = line.match(/^(\d{1,2}:\d{2})~\s*(\d{1,2}:\d{2})?\s*(.+)/);
+        if (m) {
+          let nm = m[3].trim();
+          let reentry = null;
+          if (nm.includes('再入場不可')) {   // ★括弧内に埋もれる。見落とすと衝突検出が動かない
+            reentry = false;
+            nm = nm.replace(/\s*\(再入場不可\)/, '').trim();
+          }
+          cur.fixed.push({ at: m[1], until: m[2] || null, name: nm, reentry });
+        }
+      } else if (mode === 'free') {
+        cur.free.push(line);
+      }
+    }
+    return { type: 'parkTickets', tickets };
+  }
+
+  function parseHotel(raw) {
+    const t = norm(raw);
+    const L = t.split('\n').map(l => l.trim()).filter(Boolean);
+    const dd = dates(t);
+    const pax = t.match(/大人(\d+)名[,、]\s*子供(\d+)名[,、]\s*(\d+)室/);
+    const plan = L.find(l => l.includes('プラン')) || null;
+    const meals = {};
+    if (plan) {
+      meals.breakfast = plan.includes('朝食') || plan.includes('朝夕') || plan.includes('2食');
+      meals.dinner = plan.includes('夕食') || plan.includes('朝夕') || plan.includes('2食');
+    }
+    return {
+      type: 'hotel',
+      name: L.length ? L[0] : null,
+      room: L.length > 1 ? L[1] : null,
+      plan,
+      checkIn: dd.length ? dd[0][0] : null,
+      checkOut: dd.length > 1 ? dd[1][0] : null,
+      adults: pax ? Number(pax[1]) : null,
+      children: pax ? Number(pax[2]) : null,
+      rooms: pax ? Number(pax[3]) : null,
+      meals,
+      price: price(t),
+    };
+  }
+
+  /* 新幹線・在来線特急の控え。実物のスマートEXアプリ画面で検証済み（2026-08-20）。
+     テキスト控えの書式と、アプリ「詳細」画面の書式の両方を受ける */
+  const TRAIN_NAMES = 'のぞみ|ひかり|こだま|みずほ|さくら|つばめ|はやぶさ|はやて|やまびこ|なすの|とき|たにがわ|かがやき|はくたか|あさま|つるぎ|こまち|つばさ';
+
+  /* スマートEX／EX予約アプリの「詳細」画面をそのまま貼れること。
+     実物は控えのテキストと書式が違う（2026-08-15 実機の控えで確認）:
+       乗車日時  2026/7/4（土） 9:03 → 11:28      ← 1桁月日・矢印・発着の文字なし
+       区間      新横浜 → 京都
+       人数      おとな 2　こども 2
+       のぞみ 271                                  ← 「号」がない
+       座席      9号車 7番 D/E席, 8番 D/E席        ← 4席ぶんを畳んだ表記
+     旧来の「のぞみ42号 / 新大阪 16:30発 / 7号車 11A,11B,11C」も引き続き受ける。 */
+  function parseTrain(raw) {
+    const t = norm(raw);
+    const dd = dates(t);
+    const train = t.match(new RegExp(`((?:${TRAIN_NAMES})\\s*\\d{1,4}\\s*号?)`));
+
+    /* 発着：「東京（06:00発）」「東京 06:00発」 */
+    const dep = t.match(/([^\s（(→]+)\s*[（(]?(\d{1,2}:\d{2})[）)]?\s*発/);
+    const arr = t.match(/([^\s（(→]+)\s*[（(]?(\d{1,2}:\d{2})[）)]?\s*着/);
+    /* 矢印形式：「9:03 → 11:28」と「新横浜 → 京都」。
+       駅名側は先頭が数字・コロンでないことで時刻行と切り分ける */
+    const span = t.match(/(\d{1,2}:\d{2})\s*[→~]\s*(\d{1,2}:\d{2})/);
+    const sec = t.match(/([^\s→~\d:][^\s→~]*)\s*[→~]\s*([^\s→~\n]+)/);
+
+    /* 座席：「7番 D/E席」は 7D と 7E の2席。畳まれた表記を展開しないと席数を取り違える */
+    let car = null, seats = [];
+    const carM = t.match(/(\d{1,2})\s*号車/);
+    if (carM) car = Number(carM[1]);
+    const folded = [...t.matchAll(/(\d{1,3})\s*番\s*([A-E](?:\s*[\/・,、]\s*[A-E])*)\s*席/g)];
+    if (folded.length) {
+      folded.forEach(g => g[2].split(/[\/・,、\s]+/).filter(Boolean)
+        .forEach(L => seats.push(g[1] + L)));
+    } else {
+      const flat = t.match(/(\d{1,2})号車\s*([\dA-E,、.番席\s]+)/);
+      if (flat) {
+        if (car === null) car = Number(flat[1]);
+        seats = flat[2].replace(/[番席\s]/g, '').split(/[,、.]/).filter(Boolean);
+      }
+    }
+
+    /* 人数。席数との突合に使う（幼児は席なしのことがあるので、突合は使う側の判断） */
+    /* 「8:59」を「08:59」へ。時刻は桁を揃えて持つ（表示と比較のため） */
+    const hhmm = x => x ? x.replace(/^(\d):/, '0$1:') : x;
+    const ad = t.match(/(?:おとな|大人)\s*(\d{1,2})/);
+    const ch = t.match(/(?:こども|子供|小児)\s*(\d{1,2})/);
+    const prod = t.match(/(スマート\s*EX|EX\s*予約|エクスプレス\s*予約)/);
+
+    return {
+      type: 'train',
+      date: dd.length ? dd[0][0] : null,
+      trainName: train ? train[1].replace(/\s+/g, '') : null,
+      from: dep ? dep[1] : (sec ? sec[1] : null),
+      depart: hhmm(dep ? dep[2] : (span ? span[1] : null)),
+      to: arr ? arr[1] : (sec ? sec[2] : null),
+      arrive: hhmm(arr ? arr[2] : (span ? span[2] : null)),
+      car, seats,
+      adults: ad ? Number(ad[1]) : null,
+      children: ch ? Number(ch[1]) : null,
+      product: prod ? prod[1].replace(/\s+/g, '') : null,
+      price: price(t),
+    };
+  }
+
+  function detect(raw) {
+    const t = norm(raw);
+    if (/便|搭乗/.test(t) && /[A-Z]{2,3}\d{1,4}/.test(t)) return 'flight';
+    /* 「のぞみ42号」だけでなく、スマートEXアプリの「のぞみ 339」（号なし）も拾う */
+    if (new RegExp(`(?:${TRAIN_NAMES})\\s*\\d{1,4}`).test(t) ||
+        (/新幹線|スマート\s*EX|EX\s*予約|号車/.test(t) && /発|着|指定席|→/.test(t))) return 'train';
+    if (t.includes('パス') || t.includes('アトラクション') || /チケット番号/.test(t)) return 'parkTickets';
+    if (t.includes('ホテル') || t.includes('宿') || /泊|チェックイン|室/.test(t)) return 'hotel';
+    return null;
+  }
+
+  function parseAny(raw) {
+    const kind = detect(raw);
+    const parsed =
+      kind === 'flight' ? parseFlight(raw) :
+      kind === 'train' ? parseTrain(raw) :
+      kind === 'parkTickets' ? parseUsj(raw) :
+      kind === 'hotel' ? parseHotel(raw) : null;
+    if (!parsed) return { type: null, error: '種別を判別できませんでした', raw };
+    parsed.source = 'paste';
+    parsed.status = '仮';   // 貼り付け由来は「仮」。ユーザーが確認して「確定」に上げる
+    return parsed;
+  }
+
+  g.DandoriParser = { norm, dates, times, price, parseFlight, parseTrain, parseUsj, parseHotel, detect, parseAny };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* 段取りたび — 制約ソルバー
+   コアAPI（CLAUDE.md §3・変更禁止）:
+     judge(person, attraction) -> { s:'ok'|'edge'|'ng', gap:cm }
+     solve()                   -> Finding[]
+     derive()                  -> Step[]
+     bookings(today)           -> Booking[]
+     course(opts)              -> { steps, warns } | null   ← F6（パーク内の回り順）
+   データは configure() で注入する（①はHTML埋め込み、テストは data/*.json 直読み）。 */
+(function (g) {
+  'use strict';
+
+  const EDGE_CM = 5;
+  const DEFAULT_WAIT = 45;
+
+  let ATTRACTIONS = [];
+  let RULES = [];
+  let LAYOUT = null;
+  let EXPOSURE = null;   /* pro: 屋外率テーブル（雨の Finding 用） */
+  let STATE = emptyTrip();
+
+  /* schemaVersion 3: trips 配列で複数旅行を持つ（ファイル形式）。
+     solver が configure() で受けるのは trips[i] の1旅行スライス。 */
+  function emptyTrip() {
+    return {
+      name: '旅行1', budget: null,
+      trip: { start: null, end: null, transports: [] },
+      people: [], constraints: [], tickets: [],
+      hotel: null, flight: null, train: null, booked: {},
+      /* F6（回り順）用。未入力なら park-layout の既定値と「未定」で動く */
+      parkHours: { open: null, close: null, waitMin: null },
+    };
+  }
+  function emptyState() {
+    return { schemaVersion: 3, activeTrip: 't1', trips: [{ id: 't1', ...emptyTrip() }] };
+  }
+  function migrateState(s) {
+    if (!s) return null;
+    if (s.schemaVersion === 3) return Array.isArray(s.trips) && s.trips.length ? s : null;  // 壊れたv3で白画面にしない
+    if (s.schemaVersion === 1) {
+      const t = s.trip || {};
+      const transports = [];
+      if (t.trainDate) transports.push({ leg: 'outbound', mode: 'train', date: t.trainDate });
+      if (t.flightDate) transports.push({ leg: 'return', mode: 'flight', date: t.flightDate });
+      s = { ...s, schemaVersion: 2, trip: { start: t.start || null, end: t.end || null, transports } };
+    }
+    if (s.schemaVersion !== 2) return null;
+    return { schemaVersion: 3, activeTrip: 't1', trips: [{
+      id: 't1', name: '旅行1', budget: null,
+      trip: s.trip, people: s.people || [], constraints: s.constraints || [],
+      tickets: s.tickets || [], hotel: s.hotel || null, flight: s.flight || null,
+      train: s.train || null, booked: s.booked || {},
+    }] };
+  }
+
+  function configure(opts) {
+    if (opts.attractions) ATTRACTIONS = opts.attractions;
+    if (opts.rules) RULES = opts.rules;
+    if (opts.layout) LAYOUT = opts.layout;
+    if (opts.exposure) EXPOSURE = opts.exposure;
+    if (opts.state) STATE = opts.state;
+  }
+
+  /* ── 時刻ユーティリティ ── */
+  const toMin = t => { const [a, b] = t.split(':').map(Number); return a * 60 + b; };
+  const toStr = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+
+  /* ★「1ヶ月前」は暦月で引く。-30日だと 9/20→8/21 になり1日遅れて詰む。
+     航空券の「360日前」は日数。両方が混在するので offsetMonths / offsetDays を別に持つ */
+  function shift(iso, m, d) {
+    const x = new Date(iso + 'T00:00:00');
+    if (m) x.setMonth(x.getMonth() + m);
+    if (d) x.setDate(x.getDate() + d);
+    return x;
+  }
+  const isoDate = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+
+  /* ── F1. 身長判定 ──
+     公式の構造は2段：単独利用は minHeight、付き添い者同伴なら minHeightWithAdult まで下がる
+     （null=同伴なら制限なし）。家族に大人がいれば同伴値で判定する。schemaVersion 1 データ
+     （minHeightWithAdult 未定義）は minHeight のみで従来どおり動く */
+  function effectiveMin(a) {
+    const hasAdult = STATE.people.some(q => q.adult);
+    if (hasAdult && 'minHeightWithAdult' in a) return a.minHeightWithAdult;
+    const m = a.minHeight !== undefined ? a.minHeight : a.min;
+    return m === undefined ? null : m;
+  }
+  function judge(p, a) {
+    const min = effectiveMin(a);
+    const max = a.maxHeight !== undefined ? a.maxHeight : null;
+    if (p.h === null || p.h === undefined) return min === null ? { s: 'ok', gap: 0 } : { s: 'unknown', gap: null };
+    if (max !== null && p.h > max) return { s: 'ng', gap: 0, over: true };
+    if (min === null || p.h >= min) return { s: 'ok', gap: 0 };
+    const gap = min - p.h;
+    return { s: gap <= EDGE_CM ? 'edge' : 'ng', gap };
+  }
+
+  /* ★公式の休止情報に載っているものは「乗れるもの」として扱わない。
+     判定・回り順から外すだけで ATTRACTIONS からは消さない（券の突合には残す必要がある）。
+     再開すれば data 側の closed を外すだけで戻る */
+  function open_() { return ATTRACTIONS.filter(a => !a.closed); }
+
+  function verdictCounts(p) {
+    const c = { ok: 0, edge: 0, ng: 0, unknown: 0 };
+    open_().forEach(a => { c[judge(p, a).s]++; });
+    return c;
+  }
+
+  /* チケットの対象アトラクション名をマスタへ突合する（正規化済み前提） */
+  function matchAttraction(name) {
+    const n = g.DandoriParser ? g.DandoriParser.norm(name) : name;
+    return ATTRACTIONS.find(a =>
+      (g.DandoriParser ? g.DandoriParser.norm(a.name) : a.name) === n ||
+      a.short === n || a.id === n) || null;
+  }
+
+  /* ── pro 専用: 雨の Finding（屋外率テーブル exposure.usj.json を使う） ──
+     公開リポの回り順エンジンを取り込んだ際に、pro 側だけにあったこの機能を移植した。
+     公開側の parkDays() は日付の配列を返すため、Map を返す旧実装は ticketsByDate() に改名した */
+  const mdOf = iso => { const p = iso.split('-'); return `${+p[1]}/${+p[2]}`; };
+
+  const fmtMin = n => n >= 60
+    ? (n % 60 ? `${Math.floor(n / 60)}時間${n % 60}分` : `${n / 60}時間`)
+    : `${n}分`;
+
+  /* 入場日ごとに券をまとめる。date が無い券は「パーク日が不明」なので捨てる（推測しない） */
+  function ticketsByDate() {
+    const m = new Map();
+    (STATE.tickets || []).forEach(t => {
+      if (!t.date) return;
+      if (!m.has(t.date)) m.set(t.date, []);
+      m.get(t.date).push(t);
+    });
+    return m;
+  }
+
+  /* 券の対象アトラクションから area を引く。fixed/slots は ride か名前、free は名前だけ */
+  function areasOf(tickets) {
+    const out = [];
+    tickets.forEach(t => {
+      const named = [...(t.fixed || t.slots || []), ...(t.free || []).map(n => ({ name: n }))];
+      named.forEach(s => {
+        const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+        if (a && a.area) out.push(a.area);
+      });
+    });
+    return [...new Set(out)];
+  }
+
+  /* null のエリアは平均から外し、外したことを partial で持ち帰る（黙って 0 にしない） */
+  function outdoorRatioOf(areas) {
+    const table = (EXPOSURE && EXPOSURE.areas) || {};
+    const vals = [];
+    let missing = 0;
+    areas.forEach(a => {
+      const v = table[a];
+      if (typeof v === 'number') vals.push(v); else missing++;
+    });
+    if (!vals.length) return { ratio: null, partial: missing > 0 };
+    return { ratio: vals.reduce((s, x) => s + x, 0) / vals.length, partial: missing > 0 };
+  }
+
+  /* 帰りの便までの脚。mode が無い脚は推測せず合計から外し、外したことを partial で持ち帰る */
+  function returnOutdoorMin() {
+    const d = STATE.constraints.find(c => c.type === 'departure');
+    if (!d || !Array.isArray(d.legs) || !d.legs.length) return null;
+    const table = (EXPOSURE && EXPOSURE.legModes) || {};
+    let min = 0, known = 0, unknown = 0;
+    d.legs.forEach(l => {
+      const r = l.mode ? table[l.mode] : undefined;
+      if (typeof r === 'number') { min += (l.min || 0) * r; known++; } else unknown++;
+    });
+    return known ? { min: Math.round(min), partial: unknown > 0 } : null;
+  }
+
+  function rainFindings() {
+    const out = [];
+    const ret = returnOutdoorMin();
+    const retDate = STATE.trip && STATE.trip.end;
+    if (ret && ret.min > 0 && retDate && !ticketsByDate().has(retDate)) {
+      out.push({
+        lv: 'note', kind: 'rain',
+        ti: `帰りの日 ${mdOf(retDate)} で屋外なのは ${fmtMin(ret.min)} です`,
+        /* partial のとき「濡れるのはこの分だけです」は言えない。除外がある時点で
+           完全性を断言できないため、集計対象を限定した表現に切り替える（C2） */
+        dt: ret.partial
+          ? '種別が分かっている区間だけの集計です。種別が未設定の区間は含めていません。'
+          : '移動の大半は屋内か車内で、濡れるのはこの分だけです。',
+        fix: '折りたたみ1本を手荷物に。人数分は要りません。',
+      });
+    }
+    const days = [...ticketsByDate().entries()].map(function (e) {
+      return { date: e[0], tickets: e[1] };
+    });
+    if (!days.length) return out;
+    /* 推定屋外分数の降順。算出できない日は後ろへ。同順は日付順（設計 §どの日を warn にするか）
+       r・stay は sort 用に一度だけ算出し、map 側はここでスタッシュした値を読むだけにする
+       （他に days の変異は入らないので、forEach→sort→map の間で古くなる心配は無い） */
+    days.forEach(d => {
+      const r = outdoorRatioOf(areasOf(d.tickets));
+      const stay = d.tickets.map(t => t.stayHours).find(h => typeof h === 'number');
+      d._ratio = r;
+      d._stay = stay;
+      d._min = (r.ratio !== null && typeof stay === 'number') ? stay * 60 * r.ratio : null;
+    });
+    days.sort((a, b) => {
+      if ((a._min === null) !== (b._min === null)) return a._min === null ? 1 : -1;
+      if (a._min !== null && a._min !== b._min) return b._min - a._min;
+      return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+    });
+
+    const single = days.length === 1;
+    return days.map((d, i) => {
+      const r = d._ratio;
+      const stay = d._stay;
+      const outdoorMin = d._min === null ? null : Math.round(d._min);
+      const verified = !!(EXPOSURE && EXPOSURE._verified);
+
+      const head = single
+        ? `雨の日に気をつけるのは ${mdOf(d.date)} です`
+        : (i === 0
+            ? `雨の日に一番壊れるのは ${mdOf(d.date)} です`
+            : `${mdOf(d.date)} も屋外中心の日です`);
+
+      let dt = 'パーク日。待機列と移動が屋外中心で、傘は待機列で使えません。';
+      if (outdoorMin !== null) {
+        dt += ` 滞在${stay}時間のうち屋外はおよそ${fmtMin(outdoorMin)}`
+          + `（屋外率${r.ratio.toFixed(2)}${verified ? '' : '・未検証の推定値'}）。`;
+      }
+      if (r.partial) {
+        dt += outdoorMin === null
+          ? ' 屋外率が未設定のエリアがあるため、時間の見積もりは出していません。'
+          : ' 屋外率が未設定のエリアは、この見積もりに含めていません。';
+      }
+
+      return {
+        lv: i === 0 ? 'warn' : 'note',
+        kind: 'rain', ti: head, dt,
+        fix: 'レインコートを人数分。ベビーカーにはレインカバー。傘は当てにしない。',
+      };
+    }).concat(out);
+  }
+
+  /* ── F2〜F5. 破綻検出 ──
+     today（ISO日付）を渡すと「もう予約できるのに押さえていない」も検出する（G）。
+     省略時は日付に依存する検出だけを飛ばす */
+  function solve(today) {
+    const f = [];
+    const kids = STATE.people.filter(p => !p.adult);
+    const naps = STATE.constraints.filter(c => c.type === 'nap');
+    const dep = STATE.constraints.find(c => c.type === 'departure');
+
+    /* A. 時間指定 × 再入場不可 × 昼寝の衝突（F2） */
+    STATE.tickets.forEach(t => (t.fixed || t.slots || []).forEach(s => {
+      if (s.reentry === false && s.until) {
+        naps.forEach(c => {
+          const S = toMin(s.at), E = toMin(s.until), a = toMin(c.from), b = toMin(c.to);
+          if (S < b && a < E) {
+            f.push({ lv: 'warn', kind: 'conflict', ti: '時間指定と昼寝が重なります',
+              dt: `${s.name} は ${s.at}〜 で再入場できません。${c.label}（${c.from}–${c.to}）と時間帯が接触します。`,
+              fix: `昼寝を ${s.until} 以降にずらす。エリアは一度の滞在で完結させる前提で組む。` });
+          } else if (Math.abs(E - a) <= 30) {
+            /* ★「ホテルで休憩」と書けるのは、パークへ戻れるときだけ。
+               USJは年間パス以外は再入場できない＝出たらその日は終わり。券種を見て文面を変える */
+            f.push({ lv: 'note', kind: 'adjacent', ti: '昼寝は指定枠の直後に置けます',
+              dt: `${s.name}（${s.at}〜${s.until}・再入場不可）を終えてから ${c.label} に入る形なら衝突しません。`,
+              fix: `午前は下の子向け → ${s.at} に指定枠 → ${s.until} から休憩、の順に固定。`
+                + (canReenter() ? '' : ' ただしパークを出ると同じ券では戻れないので、休憩はパーク内でとるか、出るならこれを最後の予定にする。') });
+          }
+        });
+      }
+    }));
+
+    /* ★B0. 休止中（公式の休止情報）が券の対象や「行きたい」に入っていたら黙って消さない。
+       open_() で判定・回り順からは外してあるので、ここで出さないと理由ごと消える。
+       身長の話ではないので deadSlot や wantMiss には混ぜない */
+    const closedHit = new Map();
+    STATE.tickets.forEach(t => {
+      [...(t.free || []), ...(t.fixed || t.slots || []).map(x => x.name)]
+        .map(n => n && matchAttraction(n)).forEach(a => { if (a && a.closed) closedHit.set(a.id, a); });
+      (t.fixed || t.slots || []).forEach(x => {
+        const a = x.ride && ATTRACTIONS.find(y => y.id === x.ride);
+        if (a && a.closed) closedHit.set(a.id, a);
+      });
+    });
+    (STATE.constraints || []).filter(c => c.type === 'want').forEach(c => {
+      (c.rides || []).forEach(id => {
+        const a = ATTRACTIONS.find(y => y.id === id);
+        if (a && a.closed) closedHit.set(a.id, a);
+      });
+    });
+    if (closedHit.size) {
+      const list = [...closedHit.values()];
+      f.push({ lv: 'warn', kind: 'closedRide', ti: '休止中のアトラクションが入っています',
+        dt: `${list.map(a => a.name).join('、')} は公式が休止中と告知しています。`
+          + `${list.map(a => a.closedNote).filter(Boolean).join(' ')} 当日は乗れないので、この枠は数えていません。`,
+        fix: '別のものに置き換える。来園前に公式の「ショー＆アトラクション休止情報」で再開していないか確認する。' });
+    }
+
+    /* B. 券のムダ枠（F2）。無駄と断定せず子どもスイッチを併記する */
+    STATE.tickets.forEach(t => {
+      const freeNames = (t.free || []);
+      const dead = freeNames.map(matchAttraction)
+        .filter(a => a && !a.closed && kids.length && !kids.some(p => judge(p, a).s === 'ok'));
+      if (dead.length) {
+        f.push({ lv: 'note', kind: 'deadSlot', ti: '子どもが使えない枠が含まれています',
+          dt: `${t.name} の対象のうち ${dead.map(a => a.name).join('、')} は、いまの身長だと子どもは全員乗れません。`,
+          fix: '大人が交代で乗れば無駄になりません（子どもスイッチ）。券を選び直す段階なら、この枠がない構成が安い。' });
+      }
+      const used = (t.fixed || t.slots || []).map(s => s.ride ? ATTRACTIONS.find(a => a.id === s.ride) : matchAttraction(s.name))
+        .filter(a => a && !a.closed && kids.some(p => judge(p, a).s === 'ok'));
+      if (used.length) {
+        f.push({ lv: 'good', kind: 'usable', ti: '時間指定の枠は子どもが乗れます',
+          dt: `${[...new Set(used.map(a => a.name))].join('、')} は現在の身長で条件を満たしています。` });
+      }
+    });
+
+    /* C. 身長の境界（F1）。当日は靴込みで計測される */
+    kids.forEach(p => {
+      if (p.h === null || p.h === undefined) return;
+      const near = open_().filter(a => judge(p, a).s === 'edge');
+      if (near.length) {
+        const gap = judge(p, near[0]).gap;
+        f.push({ lv: 'note', kind: 'edge', ti: `${p.name}は あと${gap}cm で対象が増えます`,
+          dt: `${near.map(a => a.name).join('、')} が ${effectiveMin(near[0])}cm。現在 ${p.h}cm。`,
+          fix: '計測は当日パークで靴を履いた状態。厚めのソールで届く可能性があります。' });
+      }
+    });
+
+    /* D. ★単一障害点（F5）。none×singlePoint は「予約不要」で終わらせない。
+       代替経路と切替デッドラインを必ず生成する。
+       appliesWhen で交通手段に条件づけ（例：リムジンバスは帰りが飛行機のときのみ） */
+    RULES.filter(r => r.mode === 'none' && r.criticality === 'singlePoint' && ruleApplies(r)).forEach(r => {
+      const fb = r.fallback || null;
+      let deadline = null, busLeave = null;
+      if (dep && fb && fb.extraMinutes != null) {
+        /* 帰りの便から遡って通常経路の最終出発を出し、代替経路の所要差だけ前倒しした時刻が判断点 */
+        busLeave = parkLeave(null);
+        if (busLeave) deadline = toStr(toMin(busLeave) - fb.extraMinutes);
+      }
+      f.push({
+        lv: 'warn', kind: 'singlePoint', ti: `単一障害点：${r.label}は予約で確保できません`,
+        dt: `${r.note}${busLeave ? ` 通常経路の最終出発は ${busLeave}。` : ''}`,
+        fix: fb
+          ? `代替経路：${fb.route}（+${fb.extraMinutes}分）。` +
+            (deadline
+              ? `判断点は ${deadline}。この時刻までに乗車の見込みが立たなければ代替へ切り替える。`
+              : '帰りの便が未定のため判断点を計算できません。便が決まり次第、切替時刻を逆算します。')
+          : '代替経路が未登録です。booking-rules.json に fallback を追加してください。',
+        deadline, ruleId: r.id,
+      });
+    });
+
+    /* E. ★取消不可の順序トラップ。
+       「早く押さえろ」が成立するのは取り消せるときだけ。取消不可のものを、
+       まだ確定していない依存（宿・便・列車）より先に買うと、依存が取れなかったとき費用が戻らない */
+    const active = RULES.filter(r => ruleApplies(r) && anchorTargets(r).length);
+    const nonRef = active.filter(r => r.cancel && r.cancel.refundable === false && !allBooked(r));
+    const pending = active.filter(r => r.mode !== 'none' && !allBooked(r) &&
+      !(r.cancel && r.cancel.refundable === false));
+    if (nonRef.length && pending.length) {
+      const pendingLabels = pending.map(r => `${r.label}（${r.mode === 'unknown' ? '監視中' : '未確保'}）`);
+      f.push({
+        lv: 'warn', kind: 'cancelTrap',
+        ti: `取消不可：${nonRef.map(r => r.label).join('・')}は買うと戻せません`,
+        dt: `${pendingLabels.join('、')}がまだ確定していません。先に取消不可のものを買うと、これらが取れなかったとき費用が戻りません。`,
+        fix: '取り消せるもの（新幹線330円・宿の無料キャンセル枠など）から先に確定し、取消不可のものは依存が固まり次第すぐ買う。変動価格の値上がりとのトレードオフはあるが、順序だけは守る。',
+      });
+    }
+
+    /* G. ★もう予約できるのに押さえていない。
+       解禁日を過ぎた窓は「期限切れ」ではなく開いている。待つほど席は減り、
+       窓自体に閉じる時刻があるもの（事前申込・1年前予約）は、過ぎたら二度と使えない。
+       取消できるかで行動が変わるので、cancel を必ず添えて出す */
+    if (today) {
+      const byRule = {};
+      bookings(today).filter(b => b.state === '受付中')
+        .forEach(b => (byRule[b.id] = byRule[b.id] || []).push(b));
+      Object.values(byRule).forEach(bs => {
+        const near = bs.slice().sort((a, b) => (a.endDays ?? 9999) - (b.endDays ?? 9999))[0];
+        const r = bs[0];
+        const cx = r.cancel || {};
+        const act = cx.refundable === true
+          ? `取り消せる（${cx.note || '要確認'}）。取り消せるものから先に確定させる順序でよい。`
+          : cx.refundable === false
+            ? '取消不可。宿・便が確定してから買う（順序を守る）。'
+            : `取消規定を先に確認（${cx.note || '要確認'}）。`;
+        f.push({
+          lv: r.criticality === 'singlePoint' ? 'warn' : 'note',
+          kind: 'openNow', ruleId: r.id,
+          ti: `もう予約できます：${bs.map(b => b.label).join('・')}`,
+          dt: `${r.iso}${r.at ? ' ' + r.at : ''} に解禁済みで、いま受付中です。`
+            + (near.endIso ? `${near.endIso}${near.endAt ? ' ' + near.endAt : ''} で締切（あと${near.endDays}日）。` : '')
+            + (r.note || ''),
+          fix: act + (r.caution ? ` ※${r.caution}` : ''),
+        });
+      });
+    }
+
+    /* F. 予算超過（引き算）。判明金額の合計が予算を超えたら破綻として出す。
+       削減候補は「取消可能なもの」だけ。取消不可を削る提案は事故のもとなので、
+       削れない側として明示するに留める */
+    if (typeof STATE.budget === 'number' && STATE.budget > 0) {
+      const ruleOf = id => RULES.find(r => r.id === id) || null;
+      const items = [];
+      let unknown = 0;
+      const put = (o, label, ruleId) => {
+        if (!o) return;
+        if (o.price != null) items.push({ label, price: o.price, rule: ruleOf(ruleId) });
+        else unknown++;
+      };
+      put(STATE.hotel, '宿', 'hotel');
+      put(STATE.train, '新幹線', 'jr');
+      put(STATE.flight, '航空券', /^(ANA|NH)/.test((STATE.flight && STATE.flight.flightNo) || '') ? 'ana' : 'jal');
+      (STATE.tickets || []).forEach(t => put(t, t.name, /エクスプレス/.test(t.name || '') ? 'express' : 'parkpass'));
+      const total = items.reduce((s, x) => s + x.price, 0);
+      if (total > STATE.budget) {
+        const nonRefundable = x => x.rule && x.rule.cancel && x.rule.cancel.refundable === false;
+        const cuttable = items.filter(x => !nonRefundable(x)).sort((a, b) => b.price - a.price);
+        const locked = items.filter(nonRefundable);
+        f.push({
+          lv: 'warn', kind: 'budget',
+          ti: `予算超過：合計¥${total.toLocaleString()} / 予算¥${STATE.budget.toLocaleString()}（超過¥${(total - STATE.budget).toLocaleString()}）`,
+          dt: (unknown ? `金額不明の項目が${unknown}件あり、実際の合計はこれより増えます。` : '判明している金額の合計です。')
+            + (locked.length ? ` 取消不可のため削れない：${locked.map(x => x.label).join('、')}。` : ''),
+          fix: cuttable.length
+            ? '削減候補（取消可能なものだけ・金額順）：' + cuttable.map(x =>
+                `${x.label} ¥${x.price.toLocaleString()}${x.rule && x.rule.cancel && x.rule.cancel.note ? `（${x.rule.cancel.note}）` : ''}`).join(' / ')
+            : '取消可能な削減候補がありません。取消不可のものを買う前に構成を見直すか、予算を再設定してください。',
+        });
+      }
+    }
+
+    return f.concat(rainFindings());
+  }
+
+  /* あるルールの対象（行き/帰りで複数になりうる）がすべて予約済みか */
+  function allBooked(r) {
+    const targets = anchorTargets(r);
+    if (!targets.length) return true;
+    return targets.every(tg => {
+      const key = r.id + (tg.leg && targets.length > 1 ? '@' + tg.leg : '');
+      return !!STATE.booked[key];
+    });
+  }
+
+  /* パークを出る時刻＝帰りの便から、移動レグまでを遡った時刻。
+     F3（逆算）とF6（回り順の締切）が同じ値を使うための共通関数。
+     day を渡すと「その日が帰りの日でなければ null」を返す（別日のパーク日に締切を持ち込まない） */
+  function parkLeave(day) {
+    const dep = (STATE.constraints || []).find(c => c.type === 'departure');
+    if (!dep || !dep.at) return null;
+    if (day) {
+      const ret = (STATE.trip.transports || []).filter(t => t.leg === 'return' && t.date);
+      if (ret.length && !ret.some(t => t.date === day)) return null;
+    }
+    let t = toMin(dep.at);
+    const legs = dep.legs || [];
+    const idxMove = legs.findIndex(l => /バス|移動|リムジン/.test(l.name));
+    for (let i = 0; i <= (idxMove < 0 ? legs.length - 1 : idxMove); i++) t -= legs[i].min;
+    return toStr(t);
+  }
+
+  /* ── F3. 当日逆算 ── */
+  function derive() {
+    const d = STATE.constraints.find(c => c.type === 'departure');
+    if (!d) return [];
+    let t = toMin(d.at);
+    const out = [{ t: d.at, b: `${d.flight || '帰りの便'} ${d.airport || ''}発`.trim(), e: 'これが起点' }];
+    (d.legs || []).forEach(l => { t -= l.min; out.unshift({ t: toStr(t), b: l.name, e: `${l.min}分` }); });
+    out.unshift({ t: toStr(t - 30), b: 'ホテルで荷物を受け取る', e: 'チェックアウト後の預けから' });
+    return out;
+  }
+
+  /* ── F4. 予約解禁の逆算 ──
+     アンカーの解決：start/end は旅行日、train/flight は transports の該当手段すべて
+     （往復新幹線なら JR 解禁は行き・帰りの2件になる）。旧 trainDate/flightDate も受ける */
+  const LEG_LABEL = { outbound: '行き', return: '帰り' };
+
+  function transportsDecided() {
+    const ts = STATE.trip.transports || [];
+    return ['outbound', 'return'].every(leg => ts.some(t => t.leg === leg && t.mode));
+  }
+
+  function ruleApplies(r) {
+    if (r.watchOnly) return false;   // 監視(②)専用ルール。①の旅程には出さない
+    /* 航空会社ルール：便名が分かっていれば他社のルールは出さない（JAL利用時にANAは不要） */
+    if (r.carrier) {
+      const fn = STATE.flight && STATE.flight.flightNo;
+      if (fn) {
+        const carrier = /^(JAL|JL)/.test(fn) ? 'JAL' : /^(ANA|NH)/.test(fn) ? 'ANA' : null;
+        if (carrier && carrier !== r.carrier) return false;
+      }
+    }
+    if (!r.appliesWhen) return true;
+    const ts = STATE.trip.transports || [];
+    const m = r.appliesWhen.returnMode;
+    if (m) {
+      if (ts.some(t => t.leg === 'return' && t.mode === m)) return true;
+      /* 帰りの手段が未定なら適用の可能性が残る＝隠さない。確定済みで不一致なら適用外 */
+      return !ts.some(t => t.leg === 'return' && t.mode);
+    }
+    return true;
+  }
+
+  function anchorTargets(r) {
+    const tr = STATE.trip;
+    if (r.anchor === 'start' || r.anchor === 'end') return [{ date: tr[r.anchor] || null, leg: null }];
+    const mode = (r.anchor === 'train' || r.anchor === 'trainDate') ? 'train'
+      : (r.anchor === 'flight' || r.anchor === 'flightDate') ? 'flight' : null;
+    if (!mode) return [{ date: null, leg: null }];
+    const ts = (tr.transports || []).filter(t => t.mode === mode);
+    if (ts.length) return ts.map(t => ({ date: t.date || null, leg: t.leg }));
+    /* その手段を使わないと確定していればルール自体を出さない。未定なら「未定」で出す */
+    return transportsDecided() ? [] : [{ date: null, leg: null }];
+  }
+
+  /* ★offset* は「窓が開く日」であって締切ではない。解禁日を過ぎた＝もう予約できる（受付中）。
+     これを「期限切れ」と表示すると、いま押さえられるものを取り逃す。
+     窓が閉じる側は rule.end（省略時は anchor 当日＝乗車日・搭乗日・来園日）。
+     ※日付粒度で判定する（today は日付のみ）。開く/閉じる当日は時刻を併記して判断を委ねる */
+  function windowEnd(r, base) {
+    if (!base) return null;
+    const e = r.end || { offsetMonths: 0, offsetDays: 0, at: null };
+    return { when: shift(base, e.offsetMonths || 0, e.offsetDays || 0), at: e.at || null };
+  }
+
+  function bookings(today) {
+    const T = new Date(today + 'T00:00:00');
+    const out = [];
+    RULES.filter(ruleApplies).forEach(r => {
+      const targets = anchorTargets(r);
+      targets.forEach(tg => {
+        const base = tg.date;
+        const needsDate = !(r.mode === 'asap' || r.mode === 'none');
+        const when = (base && needsDate) ? shift(base, r.offsetMonths || 0, r.offsetDays || 0) : null;
+        const days = when ? Math.round((when - T) / 86400000) : null;
+        const end = (r.mode === 'none' || r.mode === 'unknown') ? null : windowEnd(r, base);
+        const endDays = end ? Math.round((end.when - T) / 86400000) : null;
+        const key = r.id + (tg.leg && targets.length > 1 ? '@' + tg.leg : '');
+        const done = !!STATE.booked[key];
+        const open = days !== null && days < 0;                 // 解禁済み
+        const closed = endDays !== null && endDays < 0;         // 窓が閉じた
+        const state =
+          r.mode === 'none' ? '予約不可' :
+          done ? '済' :
+          (needsDate && !base) ? '未定' :
+          r.mode === 'unknown' ? '監視中' :
+          closed ? '締切' :
+          open ? '受付中' : '未';
+        out.push({
+          ...r, when, days, done, key,
+          label: r.label + (tg.leg && targets.length > 1 ? `（${LEG_LABEL[tg.leg]}）` : ''),
+          iso: when ? isoDate(when) : null,
+          endIso: end ? isoDate(end.when) : null, endAt: end ? end.at : null, endDays,
+          state,
+        });
+      });
+    });
+    return out.sort((a, b) => {
+      /* 受付中＝いま行動できる。いちばん上に置く（下に埋もれると取り逃す） */
+      const rank = x => x.state === '受付中' ? 0 : x.state === '未' ? 1 : x.state === '監視中' ? 2 :
+                        x.state === '未定' ? 3 : x.state === '予約不可' ? 4 : x.state === '済' ? 5 : 6;
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      /* 受付中どうしは「先に閉じる窓」が上 */
+      if (a.state === '受付中' && b.state === '受付中') return (a.endDays ?? 9999) - (b.endDays ?? 9999);
+      return (a.days ?? 9999) - (b.days ?? 9999);
+    });
+  }
+
+  /* 同日に複数締切が重なる場合の明示（F4。例：8/20 の 10:00 と 11:00） */
+  function overlaps(today) {
+    const byDay = {};
+    bookings(today).filter(b => b.iso && b.state === '未').forEach(b => {
+      (byDay[b.iso] = byDay[b.iso] || []).push(b);
+    });
+    return Object.entries(byDay).filter(([, v]) => v.length > 1)
+      .map(([day, v]) => ({ day, items: v.map(b => `${b.at || '終日'} ${b.label}`) }));
+  }
+
+  /* ── 未定項目の収集（「これから決めること」欄へ自動で流す） ── */
+  function undecided() {
+    const u = [];
+    STATE.people.forEach(p => {
+      if (p.h === null || p.h === undefined) u.push({ what: `${p.name}の身長`, why: '判定の起点。1cmで乗れるものが変わる' });
+    });
+    if (!STATE.trip.start) u.push({ what: '旅行日', why: '予約解禁日の逆算に必要' });
+    const ts = STATE.trip.transports || [];
+    const MODE_LABEL = { train: '新幹線', flight: '飛行機', bus: 'バス', car: '車' };
+    ['outbound', 'return'].forEach(leg => {
+      const t = ts.find(x => x.leg === leg && x.mode);
+      if (!t) u.push({ what: `${LEG_LABEL[leg]}の交通手段`, why: '手段で予約ルールと単一障害点の検査が変わる' });
+      else if (!t.date) u.push({ what: `${LEG_LABEL[leg]}の${MODE_LABEL[t.mode] || t.mode}の日付`, why: '解禁日の逆算に必要' });
+    });
+    if (ts.some(x => x.leg === 'return' && x.mode) && !STATE.constraints.some(c => c.type === 'departure')) {
+      u.push({ what: '帰りの出発時刻', why: '当日の締切と単一障害点の判断点を逆算できない' });
+    }
+    const infants = STATE.people.filter(p => !p.adult && p.age !== null && p.age <= 3);
+    if (infants.length && !STATE.constraints.some(c => c.type === 'nap')) {
+      u.push({ what: `昼寝の時間帯（${infants.map(p => p.name).join('・')}）`, why: '再入場不可の時間指定と衝突しうる' });
+    }
+    /* 昼寝の場所は「パークを出るか」＝再入場できるかの分岐。年間パス以外は出たら戻れない */
+    if (canReenter() === false) {
+      STATE.constraints.filter(c => c.type === 'nap' && !c.where).forEach(c => {
+        u.push({ what: `${c.label || '昼寝'}の場所（パーク内か、一度出るか）`,
+          why: 'いまの券では出ると戻れない。どちらかで組み方が変わる' });
+      });
+    }
+    if (STATE.hotel && !STATE.hotel.checkIn) u.push({ what: '宿のチェックイン日', why: '解禁監視・逆算に必要' });
+    STATE.tickets.forEach(t => { if (!t.date) u.push({ what: `${t.name}の入場日`, why: '時間指定の衝突検査に必要' }); });
+    /* pro 専用: 雨の見積もりに要る2つ。滞在時間と、帰りの日の区間が屋内か屋外か */
+    STATE.tickets.forEach(t => {
+      if (t.date && t.stayHours == null)
+        u.push({ what: `${t.name}の滞在時間`, why: '屋外にいる時間を見積もれない' });
+    });
+    const depLegs = (STATE.constraints.find(c => c.type === 'departure') || {}).legs;
+    if (Array.isArray(depLegs) && depLegs.some(l => !l.mode))
+      u.push({ what: '帰りの日の区間の種別', why: '屋内か屋外かが決まらず濡れる時間を出せない' });
+    /* パーク当日の開園・閉園（F6の区間計算に必要。閉園は帰りの便から逆算できれば不要） */
+    const pday = parkDay();
+    if (ring().length && pday) {
+      const ph = parkHoursFor(pday);
+      if (!ph.open && !dayInfo(pday).some(x => x.entryTime)) {
+        u.push({ what: `パークの開園時刻（${pday}）`, why: '最初の区間に何件入るか計算できない' });
+      }
+      if (!ph.close && !LAYOUT.closeDefault && !parkLeave(pday)) {
+        u.push({ what: `パークの閉園時刻（${pday}）`, why: '最後の区間に何件入るか計算できない' });
+      }
+    }
+    bookings('2000-01-01').filter(b => b.state === '未定').forEach(b => {
+      u.push({ what: `${b.label}の解禁日`, why: '基準日が未定のため逆算できない' });
+    });
+    /* 重複除去 */
+    const seen = new Set();
+    return u.filter(x => !seen.has(x.what) && seen.add(x.what));
+  }
+
+  /* ── F6. パーク内の回り順（コース） ──
+     ★これは「候補を出す」機能ではない。時間指定・昼寝・帰りの締切を動かせない固定点として置き、
+     その隙間ごとに「歩く分を引いたら何件入らないか」を出す＝引き算のまま順序だけを決める。
+     待ち時間は当日次第なので推定しない。仮定値（既定45分）を明示したうえで件数だけ数える。
+     地理データ（環状の順序と徒歩分）は data/park-layout.<park>.json から configure() で入る。 */
+  const num = (v, d) => (typeof v === 'number' && isFinite(v) && v > 0) ? v : d;
+  const NORM = s => (g.DandoriParser ? g.DandoriParser.norm(String(s || '')) : String(s || ''));
+  const ring = () => (LAYOUT && Array.isArray(LAYOUT.ring)) ? LAYOUT.ring : [];
+  const ringOf = area => ring().find(r => r.area === area) || null;
+  const ringIdx = area => ring().findIndex(r => r.area === area);
+
+  /* 環に沿って from→to を一方向に歩く。from===to は「一周」になる（step=±1） */
+  function arc(from, to, step) {
+    const R = ring();
+    const i = ringIdx(from), j = ringIdx(to);
+    if (i < 0 || j < 0) return { min: 0, path: [from, to].filter(Boolean), unknown: true };
+    const path = [];
+    let m = 0, k = i;
+    do {
+      path.push(R[k].area);
+      m += step > 0 ? (R[k].toNextMin || 0) : (R[(k - 1 + R.length) % R.length].toNextMin || 0);
+      k = (k + step + R.length) % R.length;
+    } while (k !== j);
+    path.push(R[j].area);
+    return { min: m, path };
+  }
+
+  /* 環状なので双方向に歩ける。短いほうを返す（経路上のエリアは通りがかりに寄れる） */
+  function walk(from, to) {
+    const i = ringIdx(from), j = ringIdx(to);
+    /* 環に無いエリア（データ未整備）は距離を作らない。順序だけ通す */
+    if (i < 0 || j < 0) return { min: 0, path: [...new Set([from, to].filter(Boolean))], unknown: true };
+    if (i === j) return { min: 0, path: [from] };
+    const f = arc(from, to, 1), b = arc(from, to, -1);
+    return f.min <= b.min ? f : b;
+  }
+
+  /* 遠回り（from===to なら一周）。同じ分数なら「乗れるものが早く出てくる向き」を取る */
+  function sweep(from, to, rideable) {
+    if (ringIdx(from) < 0 || ringIdx(to) < 0) return walk(from, to);
+    const f = arc(from, to, 1), b = arc(from, to, -1);
+    if (f.min !== b.min) return f.min > b.min ? f : b;
+    const firstHit = p => {
+      const k = p.findIndex(area => open_().some(a => a.area === area && rideable(a)));
+      return k < 0 ? 99 : k;
+    };
+    return firstHit(f.path) <= firstHit(b.path) ? f : b;
+  }
+  const loopMin = () => ring().reduce((s, r) => s + (r.toNextMin || 0), 0);
+  /* 環に沿って i から j へ順方向に進む分数（i===j は一周ではなく0） */
+  function fwdMin(i, j) {
+    const R = ring();
+    let m = 0;
+    for (let k = i; k !== j; k = (k + 1) % R.length) m += R[k].toNextMin || 0;
+    return m;
+  }
+
+  /* エリア入場枠（例「スーパー・ニンテンドー・ワールド」）はアトラクションではないので
+     マスタに当たらない。別名でエリアへ寄せる */
+  function areaEntryOf(name) {
+    const n = NORM(name);
+    const hit = ring().find(r => (r.names || []).some(x => n.includes(NORM(x))));
+    if (hit) return hit.area;
+    const exact = ring().find(r => n.includes(NORM(r.area)));
+    return exact ? exact.area : null;
+  }
+
+  /* 誰が乗れるか。all=子ども全員○ / some=一部○ / switch=子どもは全員×だが大人は○ / none=誰も乗れない */
+  function rideClass(a) {
+    const kids = STATE.people.filter(p => !p.adult);
+    const adults = STATE.people.filter(p => p.adult);
+    const adultOk = adults.some(p => judge(p, a).s === 'ok');
+    if (!kids.length) return adultOk ? 'all' : 'none';
+    const ok = kids.filter(p => judge(p, a).s === 'ok');
+    if (ok.length === kids.length) return 'all';
+    if (ok.length) return 'some';
+    return adultOk ? 'switch' : 'none';
+  }
+  const cantRide = a => STATE.people.filter(p => !p.adult && judge(p, a).s !== 'ok').map(p => p.name);
+
+  /* ★1.5デイ・2デイ券は「入場日」だけでは日が足りない。券名から使える日を展開する。
+     1.5デイ＝初日は入場時間から（例15:00）＋翌日は終日。2デイ＝2日とも終日。
+     パーサは触らない（控えに書いてあるのは入場日1つだけなので、ここで解釈する） */
+  function ticketDays(t) {
+    if (!t || !t.date) return [];
+    const m = NORM(t.name || '').match(/([0-9]+(?:\.[0-9]+)?)\s*デイ/);
+    const n = m ? Math.ceil(parseFloat(m[1])) : 1;
+    const out = [];
+    for (let i = 0; i < Math.max(1, Math.min(n, 5)); i++) {
+      out.push({
+        date: isoDate(shift(t.date, 0, i)),
+        /* 初日だけ入場時間が効く（1.5デイの午後入場）。2日目以降は開園から */
+        entryTime: i === 0 ? (t.entryTime || null) : null,
+        nth: i + 1, of: n, ticket: t.name,
+      });
+    }
+    return out;
+  }
+
+  /* パーク日：券から展開した日をすべて（1.5デイなら2日）。無ければ旅行開始日 */
+  function parkDays() {
+    const d = (STATE.tickets || []).flatMap(ticketDays).map(x => x.date);
+    return [...new Set(d)].sort();
+  }
+  function dayInfo(day) {
+    return (STATE.tickets || []).flatMap(ticketDays).filter(x => x.date === day);
+  }
+  /* 開園・閉園は日ごとに違う（1.5デイの初日は午後から）。byDay があればそれが勝つ */
+  function parkHoursFor(day) {
+    const ph = STATE.parkHours || {};
+    const per = (ph.byDay && day && ph.byDay[day]) || {};
+    return { open: per.open || ph.open || null, close: per.close || ph.close || null, waitMin: ph.waitMin };
+  }
+  function parkDay() {
+    const fixed = (STATE.tickets || [])
+      .filter(t => t.date && (t.fixed || t.slots || []).some(s => s.at)).map(t => t.date).sort();
+    return fixed[0] || parkDays()[0] || STATE.trip.start || null;
+  }
+
+  /* 画面が「通りたくないエリア」を並べるための一覧（環の順） */
+  const areas = () => ring().map(r => r.area);
+
+  /* ★パークの再入場（券種の話）。エリア入場整理券の「再入場不可」とは別物。
+     USJは年間パス以外は再入場できない＝一度出たらその日は戻れない。
+     データが無いパークでは「分からない」= null を返し、断定しない */
+  function canReenter() {
+    const r = LAYOUT && LAYOUT.reentry;
+    if (!r) return null;
+    if (r.allowed === true) return true;
+    if (!r.annualPassOnly) return false;
+    const pat = new RegExp(r.passPattern || '年間パス|年パス', 'i');
+    return (STATE.tickets || []).some(t => pat.test(t.name || ''));
+  }
+
+  /* 期間中に出るもの（ゾンビ等）。避けるかどうかを決めるのは利用者なので、ここは候補を返すだけ */
+  function hazards(day) {
+    const hs = (LAYOUT && LAYOUT.hazards) || [];
+    if (!day) return hs;
+    return hs.filter(h => !h.season || (day >= h.season.from && day <= h.season.to));
+  }
+
+  function course(opts) {
+    opts = opts || {};
+    if (!ring().length) return null;
+    const day = opts.day || parkDay();
+    const ph = parkHoursFor(day);
+    const wait = num(opts.waitMin, num(ph.waitMin, num(LAYOUT.assumeWaitMin, DEFAULT_WAIT)));
+    const entrance = LAYOUT.entrance || ring()[0].area;
+    const warns = [];
+
+    /* ── 通りたくないエリア（例：ホラー・ナイトのゾンビ）──
+       時間帯つきの通行止めとして扱う。環状なので反対回りで避けられることが多い。
+       避けられない場合は「避けられない」と出す（黙って通す道を引かない） */
+    const avoids = (STATE.constraints || [])
+      .filter(c => c.type === 'avoid' && (c.areas || []).length);
+    function avoidAt(area, from, to) {
+      return avoids.find(c => {
+        if (c.areas.indexOf(area) < 0) return false;
+        if (from == null || to == null) return true;   // 時刻が不明なら「かかりうる」側に倒す
+        const a = c.from ? toMin(c.from) : 0;
+        const b = c.to ? toMin(c.to) : 24 * 60;
+        return from < b && a < to;
+      });
+    }
+    const blockedOn = (path, from, to) =>
+      [...new Set(path)].filter(area => avoidAt(area, from, to));
+
+    /* 固定点1：券の時間指定。エリア入場枠の中にライドの枠が入れ子になる形なので、重なりは1ブロックに畳む */
+    const slots = [];
+    (STATE.tickets || []).filter(t => !t.date || t.date === day).forEach(t => {
+      (t.fixed || t.slots || []).forEach(s => {
+        if (!s.at) return;
+        const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+        slots.push({ at: s.at, until: s.until || null, name: s.name, ticket: t.name,
+          area: a ? a.area : areaEntryOf(s.name), attraction: a, reentry: s.reentry });
+      });
+    });
+    slots.sort((x, y) => toMin(x.at) - toMin(y.at) ||
+      (toMin(y.until || y.at) - toMin(x.until || x.at)));
+
+    const blocks = [];
+    slots.forEach(s => {
+      const end = toMin(s.until || s.at);
+      const last = blocks[blocks.length - 1];
+      if (last && toMin(s.at) < last.end) {
+        last.end = Math.max(last.end, end);
+        last.until = toStr(last.end);
+        last.items.push(s);
+        if (!last.area) last.area = s.area;
+        if (s.reentry === false) last.reentry = false;
+        if (!s.until) last.openEnd = true;
+      } else {
+        blocks.push({ kind: 'fixed', start: toMin(s.at), end, at: s.at, until: s.until,
+          area: s.area, items: [s], reentry: s.reentry === false ? false : null, openEnd: !s.until });
+      }
+    });
+    /* 固定点2：昼寝。エリアは動かない（休むだけ）が、時間は確実に消える */
+    (STATE.constraints || []).filter(c => c.type === 'nap').forEach(c => {
+      blocks.push({ kind: 'nap', start: toMin(c.from), end: toMin(c.to),
+        at: c.from, until: c.to, area: null, label: c.label, where: c.where || null, items: [] });
+    });
+    blocks.sort((a, b) => a.start - b.start || a.end - b.end);
+
+    /* 開園・閉園。閉園は「帰りの便からの退園締切」があればそちらが勝つ（早いほうが締切） */
+    const entry = dayInfo(day).find(x => x.entryTime);
+    const open = ph.open || (entry && entry.entryTime) || LAYOUT.openDefault || null;
+    const leave = parkLeave(day);
+    const manualClose = ph.close || LAYOUT.closeDefault || null;
+    let close = null, closeSrc = null;
+    if (leave && manualClose) {
+      close = toMin(leave) <= toMin(manualClose) ? leave : manualClose;
+      closeSrc = close === leave ? 'departure' : (ph.close ? 'manual' : 'default');
+    } else if (leave) { close = leave; closeSrc = 'departure'; }
+    else if (manualClose) { close = manualClose; closeSrc = ph.close ? 'manual' : 'default'; }
+
+    /* 行きたいアトラクション。候補を増やす指定ではなく「外せないもの」の宣言として扱い、
+       入らない／通らない／乗れないなら破綻として出す */
+    const wantIds = new Set((STATE.constraints || [])
+      .filter(c => c.type === 'want').flatMap(c => c.rides || []));
+    const wants = [...wantIds].map(id => ATTRACTIONS.find(a => a.id === id)).filter(Boolean);
+
+    /* ★その日のパーク時間の外にある固定点は落とす。
+       1.5デイの初日は15:00入園なので、13:30の昼寝は「入園前」＝パークを出た話ではない */
+    const openMin = open ? toMin(open) : null;
+    const closeMin = close ? toMin(close) : null;
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (openMin != null && b.end <= openMin) { blocks.splice(i, 1); continue; }
+      if (closeMin != null && b.start >= closeMin) { blocks.splice(i, 1); continue; }
+      b.preEntry = openMin != null && b.start < openMin;   // 開園をまたぐ＝入園前から続いている
+    }
+
+    const steps = [];
+    /* 前の日に回るぶんは候補から外す（1.5デイ等で2日に分けるとき、同じものを二重に数えない） */
+    const used = new Set(opts.exclude ? [...opts.exclude] : []);
+    blocks.forEach(b => b.items.forEach(s => { if (s.attraction) used.add(s.attraction.id); }));
+
+    let pos = entrance;
+    let cur = open ? toMin(open) : null;
+    let walked = 0;    // 実際に歩く分（遠回りを選んだぶんを含む）
+    let forced = 0;    // 固定点の順序が強いる最短の移動分（往復のムダはここで測る）
+    const visited = [entrance];
+    steps.push({ kind: 'open', at: open, area: entrance,
+      b: '入園', e: open ? (ph.open ? '入力した開園時刻' : entry ? '券の入場時間' : '開園時刻は既定値（要確認）') : '開園時刻が未入力' });
+
+    function emitWindow(to, target, isLast) {
+      const span = (cur != null && to != null) ? to - cur : null;
+      const free = a => !used.has(a.id) && rideClass(a) !== 'none';
+      const gain = p => open_().filter(a => p.indexOf(a.area) >= 0 && free(a)).length;
+      const gainWant = p => open_().filter(a =>
+        p.indexOf(a.area) >= 0 && free(a) && wantIds.has(a.id) && !avoidAt(a.area, cur, to)).length;
+      const capOf = m => (span == null ? null : Math.max(0, Math.floor((span - m) / wait)));
+
+      /* 直行が既定。ただし
+         (a) 動く必要がない区間（次の固定点が同じエリア／最後の出口戻り）は一周が「回り順」そのもの
+         (b) 直行だけでは窓が埋まらない（候補 < 入る件数）ときだけ遠回りに広げる
+         ——時間が余っていないのに候補を増やすために歩くのは、引き算の逆なのでやらない */
+      let w = target ? walk(pos, target) : { min: 0, path: [pos] };
+      forced += w.min;
+      /* 通りたくないエリアを跨がない向きがあるなら、遠回りでもそちらを取る */
+      let detour = 0;
+      if (target && pos !== target && avoids.length && blockedOn(w.path, cur, to).length) {
+        const clean = [arc(pos, target, 1), arc(pos, target, -1)]
+          .filter(x => !blockedOn(x.path, cur, to).length).sort((x, y) => x.min - y.min)[0];
+        if (clean) { detour = clean.min - w.min; w = clean; }
+      }
+      if (target && ring().length) {
+        const long = sweep(pos, target, free);
+        const fits = span == null ? (pos === target) : (span - long.min) >= wait;
+        const need = pos === target || (capOf(w.min) != null && capOf(w.min) > gain(w.path));
+        const clean = !blockedOn(long.path, cur, to).length;
+        /* 行きたいものが反対側にあるなら、窓が埋まっていても遠回りする（希望が優先） */
+        const forWant = gainWant(long.path) > gainWant(w.path) && capOf(long.min) > 0;
+        if (long.min > w.min && fits && clean && (forWant || (need && gain(long.path) > gain(w.path)))) w = long;
+      }
+      const blocked = blockedOn(w.path, cur, to);
+      const rest = span != null ? span - w.min : null;
+      const cap = capOf(w.min);
+      const items = [], dropped = [];
+      w.path.forEach(area => open_().filter(a => a.area === area).forEach(a => {
+        if (used.has(a.id)) return;
+        used.add(a.id);
+        const av = avoidAt(area, cur, to);
+        if (av) { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: av.label || '通りたくないエリア' }); return; }
+        const cls = rideClass(a);
+        if (cls === 'none') { dropped.push({ id: a.id, name: a.name, short: a.short, area, why: '全員×', want: wantIds.has(a.id) }); return; }
+        items.push({ id: a.id, name: a.name, short: a.short, area, cls, ng: cantRide(a),
+          want: wantIds.has(a.id), indoor: !!a.indoor, soaks: !!a.soaks });
+      }));
+      /* 行きたいものを先に並べる。入る件数を超えたとき、上から順に取れば希望が残る */
+      items.sort((x, y) => (y.want ? 1 : 0) - (x.want ? 1 : 0));
+      const wantN = items.filter(i => i.want).length;
+      const step = { kind: 'move', at: cur != null ? toStr(cur) : null, until: to != null ? toStr(to) : null,
+        from: pos, to: target || pos, path: w.path, walkMin: w.min, spanMin: span, restMin: rest,
+        capacity: cap, items, dropped, isLast: !!isLast, detour, blocked, wantN,
+        over: cap != null && items.length > cap, short: rest != null && rest < 0,
+        wantOver: cap != null && wantN > cap };
+      steps.push(step);
+      walked += w.min;
+      if (target) { pos = target; if (visited[visited.length - 1] !== target) visited.push(target); }
+      if (to != null) cur = to;
+      return step;
+    }
+
+    blocks.forEach(b => {
+      if (cur != null && b.start > cur) emitWindow(b.start, b.area || pos, false);
+      else if (cur == null) emitWindow(b.start, b.area || pos, false);
+      if (b.kind === 'fixed') {
+        steps.push({ kind: 'fixed', at: b.at, until: b.until, area: b.area, reentry: b.reentry,
+          openEnd: b.openEnd, items: b.items.map(s => ({ name: s.name, ticket: s.ticket,
+            ride: s.attraction ? s.attraction.id : null, want: !!(s.attraction && wantIds.has(s.attraction.id)) })) });
+        if (b.area) { pos = b.area; if (visited[visited.length - 1] !== b.area) visited.push(b.area); }
+      } else {
+        steps.push({ kind: 'nap', at: b.at, until: b.until, label: b.label, where: b.where, preEntry: b.preEntry });
+      }
+      cur = Math.max(cur == null ? b.end : cur, b.end);
+    });
+
+    /* 最後の区間：出口（入口エリア）へ戻る分も歩く時間として引く */
+    emitWindow(close ? toMin(close) : null, entrance, true);
+    steps.push({ kind: 'exit', at: close, area: entrance, b: 'パークを出る',
+      e: closeSrc === 'departure' ? '帰りの便から逆算した退園の締切'
+        : closeSrc === 'manual' ? '入力した閉園時刻'
+        : closeSrc === 'default' ? '閉園時刻は既定値（要確認）' : '閉園・退園の締切が未入力' });
+
+    /* ── 破綻の検出（回り順に固有のもの） ── */
+    steps.filter(s => s.kind === 'move').forEach(s => {
+      if (s.short) {
+        warns.push({ lv: 'warn', kind: 'window',
+          ti: `${s.at}–${s.until} は移動だけで足りません`,
+          dt: `${s.path.join('→')} は徒歩${s.walkMin}分。この区間は${s.spanMin}分しかないので、${-s.restMin}分たりません。`,
+          fix: '時間指定を取り直すか、間のエリアを捨てて直行する前提に切り替える。' });
+      } else if (s.over) {
+        warns.push({ lv: 'note', kind: 'capacity',
+          ti: `${s.at}–${s.until} に入るのは${s.capacity}件（候補${s.items.length}件）`,
+          dt: `${s.spanMin}分から徒歩${s.walkMin}分を引いて実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です。`,
+          fix: `先に${s.capacity}件を選び、残りは捨てる前提で並べる（${s.items.slice(0, 4).map(i => i.short).join('・')}…）。` });
+      }
+    });
+    /* ── 行きたいアトラクションの行き先判定 ──
+       「入る／入らない」を1件ずつ確定させる。入らないものは理由と、寄るのに要る分を出す */
+    const moves = steps.filter(s => s.kind === 'move');
+    function insertCost(area) {
+      /* いまの並びのどこかへ寄り道するとして、いちばん安い区間と余分にかかる分 */
+      let best = null;
+      moves.forEach(s => {
+        if (avoidAt(area, s.at ? toMin(s.at) : null, s.until ? toMin(s.until) : null)) return;
+        const extra = walk(s.from, area).min + walk(area, s.to).min - s.walkMin;
+        if (!best || extra < best.extra) best = { extra, step: s };
+      });
+      return best;
+    }
+    const wantStatus = wants.map(a => {
+      const fixedAt = steps.find(s => s.kind === 'fixed' && s.items.some(i => i.ride === a.id));
+      if (fixedAt) return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'fixed', at: fixedAt.at, until: fixedAt.until };
+      const cls = rideClass(a);
+      if (cls === 'none') return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'cantRide' };
+      const drop = moves.find(s => s.dropped.some(d => d.id === a.id));
+      if (drop) {
+        const why = drop.dropped.find(d => d.id === a.id).why;
+        return { id: a.id, name: a.name, short: a.short, area: a.area, state: 'dropped', why, at: drop.at, until: drop.until };
+      }
+      const hit = moves.find(s => s.items.some(i => i.id === a.id));
+      if (hit) {
+        /* 入る件数を超えている区間では、どれが残るかを勝手に決めない（順位は利用者が付ける） */
+        return { id: a.id, name: a.name, short: a.short, area: a.area, cls,
+          state: hit.wantOver ? 'tight' : 'planned',
+          at: hit.at, until: hit.until, capacity: hit.capacity, wantN: hit.wantN };
+      }
+      /* 経路に出てこない理由が「避けたいエリアだから」なら、そう言う（通れないのではなく避けている） */
+      const av = avoids.find(c => c.areas.indexOf(a.area) >= 0);
+      const ins = insertCost(a.area);
+      if (av && !ins) return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'dropped', why: av.label || '通りたくないエリア' };
+      return { id: a.id, name: a.name, short: a.short, area: a.area, cls, state: 'unreachable', insert: ins };
+    });
+
+    /* 複数日をまとめて組むとき（plan）は、希望の警告は日ごとに出さず最後に1回だけ出す */
+    if (opts.wantWarns !== false) wantWarnings();
+    function wantWarnings() {
+    wantStatus.filter(w => w.state === 'cantRide').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantCantRide', ti: `行きたい ${w.short} は誰も乗れません`,
+      dt: `${w.name}（${w.area}）は、いまの身長だと家族の誰も条件を満たしません。`,
+      fix: '身長が届く人がいないので、この1件は行き先から外す。境界（あと数cm）なら02の判定を確認。' }));
+    wantStatus.filter(w => w.state === 'dropped').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantDropped', ti: `行きたい ${w.short} は回れません（${w.why}）`,
+      dt: `${w.name}（${w.area}）は ${w.at || '?'}–${w.until || '?'} の区間で対象から外れています。`,
+      fix: w.why === '全員×' ? '大人が交代で乗る（子どもスイッチ）か、行き先から外す。'
+        : '避ける時間帯・エリアを見直すか、その時間帯より前に回る順へ組み替える。' }));
+    wantStatus.filter(w => w.cls === 'switch').forEach(w => warns.push({
+      lv: 'note', kind: 'wantSwitch', ti: `行きたい ${w.short} は子どもが全員乗れません`,
+      dt: `${w.name}（${w.area}）は身長が足りず、乗れるのは大人だけです。`,
+      fix: '大人が交代で乗る（子どもスイッチ）。待ち時間はその間ぶん増えるので、区間の件数から1件減らして考える。' }));
+    wantStatus.filter(w => w.state === 'unreachable').forEach(w => warns.push({
+      lv: 'warn', kind: 'wantUnreachable', ti: `行きたい ${w.short} は今の並びだと通りません`,
+      dt: `${w.name}は${w.area}エリア。時間指定と昼寝から決まる回り順に、このエリアが入っていません。`,
+      fix: w.insert
+        ? `${w.insert.step.at}–${w.insert.step.until} の区間に寄せると +${w.insert.extra}分（その区間の実質は${w.insert.step.restMin != null ? w.insert.step.restMin + '分' : '未計算'}）。入らなければ時間指定を取り直すか、この1件を捨てる。`
+        : '寄れる区間がありません。時間指定を取り直すか、この1件を捨てる。' }));
+    moves.filter(s => s.wantOver).forEach(s => warns.push({
+      lv: 'warn', kind: 'wantOver',
+      ti: `${s.at}–${s.until} は行きたい${s.wantN}件のうち${s.capacity}件しか入りません`,
+      dt: `実質${s.restMin}分。待ち${wait}分と置くと${s.capacity}件が上限です（${s.items.filter(i => i.want).map(i => i.short).join('・')}）。`,
+      fix: '先に順位をつけて、入らないぶんは捨てるか別の日へ回す。待ちが短い時間帯（開園直後・パレード中）に寄せるのも手。' }));
+    }
+
+    /* ★パークを出て休むなら、戻れるかを先に出す。
+       USJは年間パス以外は再入場できない＝昼寝でホテルへ帰ると、その日はそこで終わり。
+       「昼寝の後にまだ予定がある」形になっていたら、それは組めない旅程になる */
+    const reenter = canReenter();
+    if (reenter === false) {
+      steps.forEach((s, i) => {
+        /* 入園前から続いている休憩は「出た」話ではないので対象外 */
+        if (s.kind !== 'nap' || s.where === 'inpark' || s.preEntry) return;
+        /* 判断材料は「出たあとにパーク時間がどれだけ残るか」。
+           やることが残っているかではなく、買った時間を捨てることになるかで見る */
+        const rest = (closeMin != null && s.until) ? closeMin - toMin(s.until) : null;
+        const after = steps.slice(i + 1).filter(x =>
+          x.kind === 'fixed' || (x.kind === 'move' && x.items.length));
+        if (rest == null || rest <= 0) {
+          if (s.where === 'out') warns.push({ lv: 'note', kind: 'reentryLast',
+            ti: `${s.at} にパークを出ると、その日はそこで終わりです`,
+            dt: `${s.label || '休憩'}でパークを出ると、いまの券では戻れません（再入場は年間パスのみ）。`,
+            fix: '出る前に、その日にやることを終わらせておく。' });
+          return;
+        }
+        warns.push({ lv: 'warn', kind: 'reentry',
+          ti: `${s.at}–${s.until} にパークを出ると戻れません`,
+          dt: `${s.label || '休憩'}のあと、パークは${close}まで（残り${Math.floor(rest / 60)}時間${rest % 60 ? (rest % 60) + '分' : ''}）あります`
+            + (after.length ? `。予定も${after.length}件残っています` : '（回る先は残っていません）')
+            + `。いまの券では再入場できません${(LAYOUT.reentry && LAYOUT.reentry.note) ? `（${LAYOUT.reentry.note}）` : ''}。`,
+          fix: 'パーク内で休む（ベビーカー・屋内の休憩スペース・レストラン）か、この休憩を最後にして残り時間を捨てる。'
+            + ((LAYOUT.reentry && LAYOUT.reentry.exceptions || []).length ? ` 例外：${LAYOUT.reentry.exceptions.join('／')}。` : '') });
+      });
+    }
+
+    /* 時間はあるのに回る先が無い区間。避けた結果そうなることがあるので、黙って空欄にしない */
+    steps.filter(s => s.kind === 'move' && s.capacity > 0 && !s.items.length).forEach(s => {
+      const why = s.dropped.length
+        ? `通り道の${s.dropped.map(d => d.short).join('・')}は対象外です（${[...new Set(s.dropped.map(d => d.why))].join('・')}）。`
+        : '通り道のアトラクションは、この日すでに別の区間へ割り当て済みです。';
+      warns.push({ lv: 'note', kind: 'emptyWindow',
+        ti: `${s.at}–${s.until} は回る先がありません（${s.capacity}件ぶんの時間が空く）`,
+        dt: `${s.path.join('→')} を歩く想定ですが、${why}`,
+        fix: avoids.length
+          ? '避ける範囲を見直すか、この時間は再訪（もう一度乗る）・ショー・食事に充てる。早めに切り上げる判断もここで。'
+          : 'この時間は再訪（もう一度乗る）・ショー・食事に充てる。早めに切り上げる判断もここで。' });
+    });
+
+    /* 通りたくないエリア：避けられたか、避けられなかったかを必ず言う */
+    steps.filter(s => s.kind === 'move').forEach(s => {
+      if (s.blocked && s.blocked.length) {
+        const av = avoidAt(s.blocked[0], s.at ? toMin(s.at) : null, s.until ? toMin(s.until) : null);
+        const label = (av && av.label) || '通りたくないエリア';
+        warns.push({ lv: 'warn', kind: 'avoid',
+          ti: `${s.blocked.join('・')} を通らずに行けません（${label}）`,
+          dt: `${s.at || '?'}–${s.until || '?'} の移動 ${s.path.join('→')} は、この時間帯に避けたいエリアを通ります。`
+            + (s.isLast ? `出口は${entrance}なので、閉園前に出るなら必ず通ります。` : `反対回りにしても ${s.to} へは届きません。`),
+          fix: s.isLast
+            ? `${av && av.from ? av.from : 'その時間'}より前に出るか、通る前提で支度する（子どもを抱っこ・前を歩く・イヤーマフ）。`
+            : `この区間の時間指定を取り直すか、${s.to} 側を捨てて手前で折り返す。` });
+      } else if (s.detour > 0) {
+        warns.push({ lv: 'note', kind: 'detour',
+          ti: `${s.at}–${s.until} は +${s.detour}分の遠回りで避けています`,
+          dt: `${s.path.join('→')}（徒歩${s.walkMin}分）。短い向きは避けたいエリアを通るので、反対回りにしました。`,
+          fix: '遠回りぶんは実質時間から引いてあります。件数が足りなければ、この区間で回る先を減らす。' });
+      }
+    });
+    steps.filter(s => s.kind === 'fixed' && s.area).forEach(s => {
+      const av = avoidAt(s.area, toMin(s.at), toMin(s.until || s.at));
+      if (!av) return;
+      warns.push({ lv: 'warn', kind: 'avoidFixed',
+        ti: `時間指定が ${s.area} にあります（${av.label || '避けたいエリア'}）`,
+        dt: `${s.at}${s.until ? '–' + s.until : '〜'} の ${s.items.map(i => i.name).join('／')} は、避けたい時間帯・エリアと重なります。`,
+        fix: '枠を取り直せるなら早い時間へ。取り直せないなら、この枠を捨てるか通る前提で支度する。' });
+    });
+
+    /* エリア入場整理券：時間指定の枠で押さえていないゲート付きエリアは、当日取れないと丸ごと消える */
+    const gateAreas = [...new Set(steps.flatMap(s => s.kind === 'move' ? s.path : (s.area ? [s.area] : [])))]
+      .map(ringOf).filter(r => r && r.gate);
+    const covered = new Set(steps.filter(s => s.kind === 'fixed' && s.area).map(s => s.area));
+    gateAreas.filter(r => !covered.has(r.area)).forEach(r => {
+      warns.push({ lv: 'warn', kind: 'gate',
+        ti: `${r.area}エリアは整理券が要る場合があります`,
+        dt: `${r.gateNote || 'エリア入場に整理券が必要になる場合があります。'} 時間指定の券で押さえていないため、取れなければこの区間はまるごと消えます。`,
+        fix: '入園直後にアプリで取得を試す。取れなかったときに回る先（同じ区間の別エリア）を先に決めておく。' });
+    });
+    /* 行ったり来たり：時間指定の順序が強いる移動と、一周で回った場合の下限との差 */
+    if (visited.length > 2) {
+      const full = loopMin();
+      const idx = [...new Set(visited.map(ringIdx))].filter(i => i >= 0).sort((a, b) => a - b);
+      /* 円周上の点を全部通る閉路の下限は「一周」と「いちばん広い隙間を除いた区間の往復」の小さいほう */
+      let gap = 0;
+      idx.forEach((v, k) => { gap = Math.max(gap, fwdMin(v, idx[(k + 1) % idx.length])); });
+      const minTour = Math.min(full, 2 * (full - gap));
+      /* 比較するのは「固定点が強いる最短移動」と「同じエリアを一周で回った場合」。
+         時間が余っていて自分から遠回りしたぶん（sweep）は往復のムダではないので数えない */
+      const extra = forced - minTour;
+      if (extra >= 10) {
+        warns.push({ lv: 'note', kind: 'backtrack',
+          ti: `時間指定の順序で ${extra}分ぶん往復します`,
+          dt: `いまの並びだと必要な移動は最短でも合計${forced}分。同じエリアを一周で回れば${minTour}分で足ります（差 ${extra}分）。`,
+          fix: '時間指定を取り直せるなら、エリアの並び順（' + ring().map(r => r.area).join('→') + '）に沿う時刻へ寄せる。' });
+      }
+    }
+    if (!close) {
+      warns.push({ lv: 'note', kind: 'closeUnknown', ti: '閉園（退園）の時刻が未入力です',
+        dt: '最後の区間に何件入るかを計算できません。',
+        fix: '当日の閉園時刻を入れる。帰りの便を貼れば退園の締切から自動で入ります。' });
+    }
+    if (!open) {
+      warns.push({ lv: 'note', kind: 'openUnknown', ti: '開園（入園）の時刻が未入力です',
+        dt: '最初の区間に何件入るかを計算できません。', fix: '当日の開園時刻か、券の入場時間を入れる。' });
+    }
+
+    return { day, open, close, closeSrc, assumeWait: wait, entrance,
+      avoids, hazards: hazards(day), wants: wantStatus, reentry: reenter,
+      walkMin: walked, forcedWalkMin: forced, steps, warns,
+      approx: !LAYOUT.verifiedAt };
+  }
+
+  /* ── F6b. 複数日をまとめて組む（1.5デイ・2デイ券）──
+     日ごとに course() を回し、前の日に回るぶんを次の日から差し引く。
+     希望（行きたい）は日をまたいで1回だけ判定する＝「初日に入らなくても2日目に入るならOK」 */
+  const WANT_RANK = { fixed: 0, planned: 1, tight: 2, dropped: 3, unreachable: 4, cantRide: 5 };
+
+  function plan(opts) {
+    opts = opts || {};
+    if (!ring().length) return null;
+    const days = parkDays();
+    if (!days.length) {
+      const only = course(opts);
+      return only ? { days: [only], wants: only.wants, warns: [], multi: false } : null;
+    }
+    const out = [];
+    /* どの日であれ時間指定で乗るものは、他の日の候補に出さない（二重に数えない） */
+    const done = new Set();
+    (STATE.tickets || []).forEach(t => (t.fixed || t.slots || []).forEach(s => {
+      const a = s.ride ? ATTRACTIONS.find(x => x.id === s.ride) : matchAttraction(s.name);
+      if (a) done.add(a.id);
+    }));
+    days.forEach((d, i) => {
+      const c = course({ day: d, waitMin: opts.waitMin, exclude: done, wantWarns: false });
+      if (!c) return;
+      c.nth = i + 1;
+      c.of = days.length;
+      c.info = dayInfo(d);
+      /* 「入る件数」までを回るぶんとして次の日から外す。入らなかったものは翌日へ残す */
+      c.steps.forEach(s => {
+        if (s.kind === 'fixed') s.items.forEach(x => { if (x.ride) done.add(x.ride); });
+        if (s.kind === 'move') s.items.slice(0, s.capacity == null ? s.items.length : s.capacity)
+          .forEach(x => done.add(x.id));
+      });
+      out.push(c);
+    });
+    if (!out.length) return null;
+
+    /* 希望：日をまたいでいちばん良い結果を採る */
+    const byId = {};
+    out.forEach(c => c.wants.forEach(w => {
+      const cur = byId[w.id];
+      if (!cur || WANT_RANK[w.state] < WANT_RANK[cur.state]) byId[w.id] = { ...w, day: c.day, nth: c.nth };
+    }));
+    const wants = Object.values(byId);
+    const warns = [];
+    const okw = wants.filter(w => w.state === 'fixed' || w.state === 'planned');
+    if (wants.length) {
+      const perDay = out.map(c => `${c.nth}日目 ${wants.filter(w => w.nth === c.nth && (w.state === 'fixed' || w.state === 'planned')).length}件`);
+      warns.push({ lv: okw.length === wants.length ? 'good' : 'note', kind: 'wantSummary',
+        ti: `行きたい${wants.length}件のうち、入るのは${okw.length}件`,
+        dt: `${perDay.join('／')}。${okw.length < wants.length ? `残り${wants.length - okw.length}件は入りません。` : '全部入ります。'}`,
+        fix: okw.length < wants.length ? '下の理由を見て、捨てるか・日を入れ替えるか・時間指定を取り直すかを決める。' : '' });
+    }
+    wants.filter(w => w.state !== 'fixed' && w.state !== 'planned').forEach(w => {
+      const from = out.find(c => c.nth === w.nth);
+      const src = (from && from.warns.filter(x => x.kind && x.kind.indexOf('want') === 0)) || [];
+      const hit = src.find(x => x.ti.indexOf(w.short) >= 0);
+      warns.push(hit ? { ...hit, ti: `${w.nth}日目：${hit.ti}` } : {
+        lv: 'warn', kind: 'wantMiss', ti: `行きたい ${w.short} は2日とも入りません`,
+        dt: `${w.name}（${w.area}）は、どの日の区間にも収まりません。`, fix: '捨てるか、券を足す。' });
+    });
+    return { days: out, wants, warns, multi: days.length > 1 };
+  }
+
+  g.DandoriSolver = {
+    EDGE_CM, configure, emptyState, emptyTrip, migrateState, judge, effectiveMin, verdictCounts, matchAttraction,
+    solve, derive, bookings, overlaps, undecided, shift, isoDate, toMin, toStr,
+    course, plan, walk, rideClass, parkDay, parkDays, parkLeave, hazards, areas,
+    ticketDays, dayInfo, parkHoursFor, canReenter,
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+/* ==LIB:END== */
+</script>
+
+<script>
+(function () {
+'use strict';
+const P = window.DandoriParser, S = window.DandoriSolver;
+const DATA = window.DANDORI_DATA;
+const ATTR = DATA.attractions.attractions;
+const RULES = DATA.bookingRules.rules;
+const LAYOUT = DATA.layout || null;   // 回り順（F6）の地理データ。無ければ 04 は出さない
+const RANGE = [80, 140];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const DEFAULT_LEGS = [
+  { name: '保安検査・搭乗手続き', min: 60 },
+  { name: 'リムジンバス USJ→伊丹', min: 40 },
+  { name: '乗り場で待つ余裕', min: 30 },
+];
+
+let FILE = S.emptyState();
+let ST = FILE.trips[0];   // アクティブ旅行への参照。ST への変更はそのまま FILE に反映される
+let selectedKid = null;
+
+function syncActive() {
+  ST = FILE.trips.find(t => t.id === FILE.activeTrip) || FILE.trips[0];
+  FILE.activeTrip = ST.id;
+}
+
+/* ── 永続化：localStorage が使えない環境がある → try/catch + ファイル書出で代替 ── */
+const LS_KEY = 'dandori-tabi/trip';
+function save() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(FILE)); $('persist-state').textContent = ''; }
+  catch (e) { $('persist-state').textContent = '⚠ この環境では自動保存できません。ファイルへ書き出してください。'; }
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) { const s = S.migrateState(JSON.parse(raw)); if (s && s.schemaVersion === 3) { FILE = s; syncActive(); } }
+  } catch (e) { /* 読めなければ新規のまま */ }
+}
+
+function exportTrip() {
+  const blob = new Blob([JSON.stringify(FILE, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'trip.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importTrip(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const s = S.migrateState(JSON.parse(r.result));
+      if (!s || s.schemaVersion !== 3) { alert('schemaVersion が違います（対応: 1〜3）'); return; }
+      FILE = s; syncActive(); save(); render();
+    } catch (e) { alert('trip.json を読めませんでした'); }
+  };
+  r.readAsText(file);
+}
+
+/* ── 貼り付けの取り込み ── */
+function setTransport(leg, mode, date) {
+  ST.trip.transports = (ST.trip.transports || []).filter(t => t.leg !== leg);
+  if (mode || date) ST.trip.transports.push({ leg, mode: mode || null, date: date || null });
+}
+
+/* legs は「出発に近い順」に並べる（derive が順に引いて時系列表示するため） */
+const TRAIN_LEGS = [
+  { name: '改札・乗車の余裕', min: 20 },
+  { name: '駅への移動', min: 60 },
+];
+
+function setDeparture(at, label, place, legs) {
+  ST.constraints = ST.constraints.filter(c => c.type !== 'departure');
+  ST.constraints.push({
+    type: 'departure', at, flight: label, airport: place,
+    legs: legs.map(l => ({ ...l })),
+    source: 'inferred', status: '仮',   // レグは既定値からの推定。編集して確定させる
+  });
+}
+
+function applyParsed(p) {
+  if (p.type === 'flight') {
+    ST.flight = p;
+    /* 行きか帰りかは旅行日との位置関係で決める。判別できなければ帰り（仮） */
+    const leg = (ST.trip.start && p.date && p.date <= ST.trip.start) ? 'outbound' : 'return';
+    setTransport(leg, 'flight', p.date);
+    if (leg === 'return' && p.depart) {
+      setDeparture(p.depart, p.flightNo,
+        (p.from || '').replace(/^.*?\(([^)]+)\).*$/, '$1') || p.from, DEFAULT_LEGS);
+    }
+  } else if (p.type === 'train') {
+    ST.train = p;
+    const leg = (ST.trip.start && p.date && p.date <= ST.trip.start) ? 'outbound' : 'return';
+    setTransport(leg, 'train', p.date);
+    if (leg === 'return' && p.depart) {
+      setDeparture(p.depart, p.trainName || '新幹線', p.from || '', TRAIN_LEGS);
+    }
+  } else if (p.type === 'parkTickets') {
+    ST.tickets = p.tickets.map(t => ({ ...t, source: 'paste', status: '仮' }));
+    const d = p.tickets.map(t => t.date).filter(Boolean).sort()[0];
+    if (d && !ST.trip.start) ST.trip.start = d;
+  } else if (p.type === 'hotel') {
+    ST.hotel = p;
+    if (p.checkIn) ST.trip.start = p.checkIn;
+    if (p.checkOut) ST.trip.end = p.checkOut;
+  }
+}
+
+/* ── サンプル（実例の構造を保った加工値。判定・逆算の動きを確認する用） ── */
+function loadSample() {
+  const t = { id: ST.id, ...S.emptyTrip(), name: 'サンプル（USJ）' };
+  FILE.trips[FILE.trips.indexOf(ST)] = t;
+  ST = t;
+  ST.trip = { start: '2026-11-15', end: '2026-11-17', transports: [
+    { leg: 'outbound', mode: 'train', date: '2026-11-15' },
+    { leg: 'return', mode: 'flight', date: '2026-11-17' },
+  ] };
+  ST.people = [
+    { id: 'p1', name: '父', age: 42, h: 172, adult: true, source: 'manual', status: '確定' },
+    { id: 'p2', name: '母', age: 36, h: 158, adult: true, source: 'manual', status: '確定' },
+    { id: 'p3', name: '第1子', age: 7, h: 120, adult: false, source: 'manual', status: '確定' },
+    { id: 'p4', name: '第2子', age: 4, h: 102, adult: false, source: 'manual', status: '確定' },
+    { id: 'p5', name: '第3子', age: 1, h: 78, adult: false, source: 'manual', status: '確定' },
+  ];
+  ST.constraints = [
+    { type: 'nap', who: 'p5', from: '13:30', to: '15:30', label: '第3子(1歳)の昼寝' },
+    { type: 'departure', at: '15:35', flight: 'JAL876', airport: '伊丹', legs: DEFAULT_LEGS.map(l => ({ ...l })), source: 'paste', status: '確定' },
+  ];
+  ST.flight = {
+    type: 'flight', flightNo: 'JAL876', date: '2026-11-17',
+    from: '大阪(伊丹)', depart: '15:35', to: '東京(羽田)', arrive: '17:00',
+    cabin: 'クラスJ', seats: ['21A', '21C', '21D', '21H'], price: null,
+    source: 'paste', status: '確定',
+  };
+  ST.tickets = [{
+    /* 1.5デイ＝初日15:00から＋翌日は終日。パーク日は2日に展開される */
+    name: '1.5デイ・スタジオ・パス 大人',
+    date: '2026-11-15', entryTime: '15:00', no: 'P:9012.0.261003.00811',
+    fixed: [], free: [], price: null, source: 'paste', status: '確定',
+  }, {
+    name: 'ユニバーサル・エクスプレス・パス 5 ~アドベンチャースペシャル~',
+    date: '2026-11-16', entryTime: null, no: 'P:9012.0.261003.00812',
+    fixed: [
+      { at: '11:30', until: '13:30', name: 'スーパー・ニンテンドー・ワールド', reentry: false },
+      { at: '11:30', until: '12:00', name: 'マリオカート ~クッパの挑戦状~', reentry: null },
+      { at: '12:00', until: '12:30', name: 'ヨッシー・アドベンチャー', reentry: null },
+    ],
+    free: ['ハリウッド・ドリーム・ザ・ライド', 'ミニオン・ハチャメチャ・ライド', 'ザ・フライング・ダイナソー'],
+    price: null, source: 'paste', status: '確定',
+  }];
+  ST.hotel = {
+    type: 'hotel', name: 'ホテル ポートサイド ガーデン', room: 'ファミリー ワンダールーム',
+    plan: 'シェフこだわりの朝食ビュッフェ付プラン',
+    checkIn: '2026-11-15', checkOut: '2026-11-17', adults: 2, children: 3, rooms: 1,
+    meals: { breakfast: true, dinner: false }, price: null, source: 'paste', status: '確定',
+  };
+  /* 開園・閉園は日ごと（1.5デイの初日は券の入場時間15:00から）。いずれも加工値 */
+  ST.parkHours = { open: null, close: null, waitMin: null, byDay: {
+    '2026-11-15': { open: null, close: '21:00' },
+    '2026-11-16': { open: '09:00', close: '20:00' },
+  } };
+  ST.booked = { jal: true, hotel: true, parkpass: true, express: true };
+  save(); render();
+}
+
+/* ── 描画 ── */
+const pct = h => Math.max(0, Math.min(100, (h - RANGE[0]) / (RANGE[1] - RANGE[0]) * 100));
+const stBdg = s => s === '確定' ? '<span class="bdg fix">確定</span>' : s === '仮' ? '<span class="bdg tmp">仮</span>' : '<span class="bdg tbd">未定</span>';
+const srcBdg = s => s ? `<span class="bdg src">${{ paste: '貼り付け', ocr: 'OCR', manual: '手入力', inferred: '推定' }[s] || s}</span>` : '';
+
+function renderPeople() {
+  $('people').innerHTML = ST.people.length ? ST.people.map(p => `
+    <div class="prow" data-id="${p.id}">
+      <div class="nm">${esc(p.name)} ${stBdg(p.h == null ? '未定' : p.status || '確定')}<span>${p.age != null ? p.age + '歳' : '年齢 未定'}${p.adult ? '・大人' : ''}</span></div>
+      ${p.adult
+        ? `<input type="number" class="h-num" value="${p.h ?? ''}" min="40" max="220" placeholder="cm">`
+        : `<input type="range" class="h-rng" min="60" max="150" value="${p.h ?? 100}" aria-label="${esc(p.name)}の身長">`}
+      <div class="val mono">${p.h != null ? p.h + '<span style="font-size:10px">cm</span>' : '<span class="miss">未定</span>'}</div>
+      <button class="del" title="削除">✕</button>
+    </div>`).join('')
+    : '<div class="empty">まず家族を追加してください。身長がこのツールの起点です。</div>';
+
+  $('people').querySelectorAll('.prow').forEach(row => {
+    const id = row.dataset.id;
+    const p = ST.people.find(x => x.id === id);
+    const rng = row.querySelector('.h-rng');
+    if (rng) rng.addEventListener('input', e => { p.h = +e.target.value; p.status = '確定'; save(); render(); });
+    const num = row.querySelector('.h-num');
+    if (num) num.addEventListener('change', e => { p.h = e.target.value === '' ? null : +e.target.value; save(); render(); });
+    row.querySelector('.del').addEventListener('click', () => {
+      if (!confirm(`${p.name} を削除しますか？`)) return;
+      ST.people = ST.people.filter(x => x.id !== id);
+      ST.constraints = ST.constraints.filter(c => !(c.type === 'nap' && c.who === id));
+      save(); render();
+    });
+  });
+
+  /* 昼寝（乳幼児のみ表示。どの予約控えにも存在しない＝手入力必須の制約） */
+  const infants = ST.people.filter(p => !p.adult && p.age != null && p.age <= 3);
+  $('naps').innerHTML = infants.map(p => {
+    const nap = ST.constraints.find(c => c.type === 'nap' && c.who === p.id);
+    /* 場所は「パークを出るか」の分岐。再入場できない券だと、出た時点でその日が終わる */
+    return `<div class="naprow" data-who="${p.id}">
+      <label><input type="checkbox" class="nap-on" ${nap ? 'checked' : ''}> ${esc(p.name)}の昼寝</label>
+      <input type="time" class="nap-from" value="${nap ? nap.from : '13:00'}" ${nap ? '' : 'disabled'}>–
+      <input type="time" class="nap-to" value="${nap ? nap.to : '15:00'}" ${nap ? '' : 'disabled'}>
+      <select class="nap-where" ${nap ? '' : 'disabled'}>
+        <option value="" ${nap && !nap.where ? 'selected' : ''}>場所 未定</option>
+        <option value="inpark" ${nap && nap.where === 'inpark' ? 'selected' : ''}>パーク内で休む</option>
+        <option value="out" ${nap && nap.where === 'out' ? 'selected' : ''}>一度パークを出る</option>
+      </select>
+    </div>`;
+  }).join('');
+  $('naps').querySelectorAll('.naprow').forEach(row => {
+    const who = row.dataset.who;
+    const p = ST.people.find(x => x.id === who);
+    const upd = () => {
+      ST.constraints = ST.constraints.filter(c => !(c.type === 'nap' && c.who === who));
+      if (row.querySelector('.nap-on').checked) {
+        ST.constraints.push({ type: 'nap', who, from: row.querySelector('.nap-from').value, to: row.querySelector('.nap-to').value,
+          where: row.querySelector('.nap-where').value || null, label: `${p.name}(${p.age}歳)の昼寝` });
+      }
+      save(); render();
+    };
+    row.querySelectorAll('input,select').forEach(el => el.addEventListener('change', upd));
+  });
+}
+
+function renderTabs() {
+  $('trip-tabs').innerHTML = FILE.trips.map(t =>
+    `<div class="tab ${t.id === ST.id ? 'on' : ''}" data-id="${t.id}">${esc(t.name || '旅行')}` +
+    (t.id === ST.id && FILE.trips.length > 1 ? '<span class="x" data-del="1">×</span>' : '') + '</div>').join('')
+    + '<div class="tab add" id="tab-add">＋ 新しい旅行</div>';
+  $('trip-tabs').querySelectorAll('.tab[data-id]').forEach(el => el.addEventListener('click', e => {
+    if (e.target.dataset.del) {
+      if (!confirm(`「${ST.name}」を削除しますか？（元に戻せません）`)) return;
+      FILE.trips = FILE.trips.filter(t => t.id !== ST.id);
+      FILE.activeTrip = FILE.trips[0].id;
+      syncActive(); selectedKid = null; save(); render(); return;
+    }
+    FILE.activeTrip = el.dataset.id;
+    syncActive(); selectedKid = null; save(); render();
+  }));
+  $('tab-add').addEventListener('click', () => {
+    const id = 't' + (Math.max(0, ...FILE.trips.map(t => +String(t.id).replace(/\D/g, '') || 0)) + 1);
+    const nt = { id, ...S.emptyTrip(), name: `旅行${FILE.trips.length + 1}` };
+    if (ST.people.length && confirm(`メンバー（${ST.people.map(p => p.name).join('・')}）を新しい旅行にコピーしますか？`)) {
+      nt.people = ST.people.map(p => ({ ...p }));
+    }
+    FILE.trips.push(nt);
+    FILE.activeTrip = id;
+    syncActive(); selectedKid = null; save(); render();
+  });
+}
+
+function renderDates() {
+  $('d-start').value = ST.trip.start || '';
+  $('d-end').value = ST.trip.end || '';
+  $('d-name').value = ST.name || '';
+  $('d-budget').value = ST.budget ?? '';
+  const ts = ST.trip.transports || [];
+  const out = ts.find(t => t.leg === 'outbound') || {};
+  const ret = ts.find(t => t.leg === 'return') || {};
+  $('t-out-mode').value = out.mode || '';
+  $('t-out-date').value = out.date || '';
+  $('t-ret-mode').value = ret.mode || '';
+  $('t-ret-date').value = ret.date || '';
+}
+
+function renderParsedCards() {
+  const cards = [];
+  if (ST.flight) {
+    const f = ST.flight;
+    cards.push(`<div class="pcard"><div class="ph">✈ 帰りの便 <span class="sp">${srcBdg(f.source)}${stBdg(f.status)}</span></div>
+      <dl><dt>便</dt><dd>${esc(f.flightNo) || '<span class="miss">未定</span>'}｜${esc(f.from) || '?'} ${esc(f.depart) || '?'}発 → ${esc(f.to) || '?'} ${esc(f.arrive) || '?'}着</dd>
+      <dt>日付</dt><dd>${f.date || '<span class="miss">未定</span>'}</dd>
+      <dt>座席</dt><dd>${f.seats && f.seats.length ? esc(f.seats.join(' ')) : '—'} ${esc(f.cabin) || ''}</dd></dl></div>`);
+  }
+  if (ST.train) {
+    const tr = ST.train;
+    cards.push(`<div class="pcard"><div class="ph">🚄 ${esc(tr.trainName) || '新幹線'} <span class="sp">${srcBdg(tr.source)}${stBdg(tr.status)}</span></div>
+      <dl><dt>区間</dt><dd>${esc(tr.from) || '?'} ${esc(tr.depart) || '?'}発 → ${esc(tr.to) || '?'} ${esc(tr.arrive) || '?'}着</dd>
+      <dt>日付</dt><dd>${tr.date || '<span class="miss">未定</span>'}</dd>
+      <dt>座席</dt><dd>${tr.car ? tr.car + '号車 ' : ''}${tr.seats && tr.seats.length ? esc(tr.seats.join(' ')) : '—'}</dd></dl></div>`);
+  }
+  ST.tickets.forEach((t, ti) => {
+    cards.push(`<div class="pcard" data-ticket="${ti}"><div class="ph">🎢 ${esc(t.name)} <span class="sp">${srcBdg(t.source)}${stBdg(t.status)}
+        ${t.status === '仮' ? '<button class="confirm-t">確定にする</button>' : ''}</span></div>
+      <dl><dt>入場日</dt><dd>${t.date || '<span class="miss">未定</span>'}${t.entryTime ? ' ' + t.entryTime + '〜' : ''}</dd></dl>
+      ${(t.fixed || []).map((s, si) => `<div class="slot"><span class="mono">${s.at}${s.until ? '–' + s.until : ''}</span> ${esc(s.name)}
+        ${s.reentry === false ? '<span class="bdg tmp">再入場不可</span>' : ''}
+        ${s.reentry === false && !s.until ? `<label style="font-size:11px">終了 <input type="time" class="slot-until" data-slot="${si}"></label>` : ''}
+      </div>`).join('')}
+      ${(t.free || []).length ? `<div class="slot" style="color:var(--muted)">時間指定なし：${t.free.map(esc).join('、')}</div>` : ''}
+    </div>`);
+  });
+  if (ST.hotel) {
+    const h = ST.hotel;
+    cards.push(`<div class="pcard"><div class="ph">🏨 ${esc(h.name) || '宿'} <span class="sp">${srcBdg(h.source)}${stBdg(h.status)}</span></div>
+      <dl><dt>日程</dt><dd>${h.checkIn || '<span class="miss">未定</span>'} 〜 ${h.checkOut || '<span class="miss">未定</span>'}</dd>
+      <dt>部屋</dt><dd>${esc(h.room) || '—'}（大人${h.adults ?? '?'}・子供${h.children ?? '?'}・${h.rooms ?? '?'}室）</dd>
+      <dt>食事</dt><dd>朝食${h.meals && h.meals.breakfast ? 'あり' : 'なし'}・夕食${h.meals && h.meals.dinner ? 'あり' : '<b>なし</b>（プラン名から推論）'}</dd></dl></div>`);
+  }
+  $('parsed').innerHTML = cards.join('');
+
+  $('parsed').querySelectorAll('[data-ticket]').forEach(card => {
+    const t = ST.tickets[+card.dataset.ticket];
+    const btn = card.querySelector('.confirm-t');
+    if (btn) btn.addEventListener('click', () => { t.status = '確定'; save(); render(); });
+    card.querySelectorAll('.slot-until').forEach(inp => inp.addEventListener('change', e => {
+      t.fixed[+inp.dataset.slot].until = e.target.value || null; save(); render();
+    }));
+  });
+}
+
+function renderRulerVerdict() {
+  const kids = ST.people.filter(p => !p.adult);
+  if (!kids.some(k => k.id === selectedKid)) selectedKid = kids.length ? kids[0].id : null;
+  const kid = kids.find(k => k.id === selectedKid) || null;
+
+  /* 家族に大人がいる前提の実効下限でライン表示（同伴値。単独値は判定表に併記） */
+  const lvls = [...new Set(ATTR.map(a => S.effectiveMin(a)).filter(v => v !== null))].sort((a, b) => a - b);
+  $('r-labels').innerHTML = lvls.map(v => {
+    const names = ATTR.filter(a => S.effectiveMin(a) === v).map(a => a.short);
+    return `<div class="thr" style="bottom:${pct(v)}%"><div class="tn"><span class="tv">${v}cm</span><br>${names.join(' / ')}</div></div>`;
+  }).join('');
+  $('r-bar').innerHTML = lvls.map(v => {
+    const hot = kid && kid.h != null && Math.abs(kid.h - v) <= S.EDGE_CM;
+    return `<div class="tick ${hot ? 'hot' : ''}" style="bottom:${pct(v)}%"></div>`;
+  }).join('');
+  $('r-people').innerHTML = kids.filter(p => p.h != null).map(p => {
+    const edge = ATTR.some(a => S.judge(p, a).s === 'edge');
+    const below = p.h < RANGE[0];
+    return `<div class="pmark ${edge ? 'edge' : ''}" style="bottom:${pct(p.h)}%">
+      <span class="dot"></span><span class="txt">${esc(p.name)}<span class="h">${below ? '▼' : ''}${p.h}</span></span></div>`;
+  }).join('');
+
+  $('kid-chips').innerHTML = kids.map(k =>
+    `<button class="chip ${k.id === selectedKid ? 'on' : ''}" data-kid="${k.id}">${esc(k.name)}</button>`).join('');
+  $('kid-chips').querySelectorAll('.chip').forEach(b =>
+    b.addEventListener('click', () => { selectedKid = b.dataset.kid; render(); }));
+
+  if (!kid || kid.h == null) {
+    $('v-for').textContent = '';
+    $('verdict').innerHTML = '<div class="empty">子どもの身長を入力すると判定が出ます。</div>';
+    ['s-ok', 's-ed', 's-ng'].forEach(id => $(id).textContent = '–');
+    return;
+  }
+  $('v-for').textContent = `${kid.name}（${kid.h}cm）で判定`;
+  let ok = 0, ed = 0, ng = 0;
+  $('verdict').innerHTML = ATTR.map(a => {
+    const r = S.judge(kid, a);
+    r.s === 'ok' ? ok++ : r.s === 'edge' ? ed++ : ng++;
+    const mark = r.s === 'ok' ? '○' : r.s === 'edge' ? '△' : '×';
+    const cls = r.s === 'ok' ? 'ok' : r.s === 'edge' ? 'ed' : 'ng';
+    const note = r.over ? `上限${a.maxHeight}cmを超過` : r.s === 'edge' ? `あと${r.gap}cm` : r.s === 'ng' ? `${r.gap}cm 足りない` : '条件を満たす';
+    const eff = S.effectiveMin(a);
+    const lim = eff === null ? (a.minHeight ? `単独${a.minHeight}` : '制限なし')
+      : (a.minHeight && a.minHeight !== eff ? `同伴${eff} / 単独${a.minHeight}` : eff + 'cm');
+    return `<div class="vr ${r.s === 'edge' ? 'edge' : ''}">
+      <div class="st ${cls}">${mark}</div>
+      <div class="an">${esc(a.name)}<em>${esc(a.area)}｜${note}${a.notes ? '｜' + esc(a.notes) : ''}${a.maxHeight ? `｜上限${a.maxHeight}cm` : ''}</em></div>
+      <div class="lim mono">${lim}</div></div>`;
+  }).join('');
+  $('s-ok').textContent = ok; $('s-ed').textContent = ed; $('s-ng').textContent = ng;
+}
+
+function renderFindings() {
+  const F = S.solve(todayIso());   // today を渡すと「もう予約できる」も出る
+  $('findings').innerHTML = F.length ? F.map(x =>
+    `<div class="fd ${x.kind === 'singlePoint' ? 'spof' : ''}">
+      <div class="ic ${x.kind === 'openNow' ? 'watch' : x.lv}">${x.kind === 'openNow' ? '▶' : x.lv === 'warn' ? '!' : x.lv === 'note' ? 'i' : '✓'}</div>
+      <div class="bd"><div class="ti">${esc(x.ti)}</div><div class="dt">${esc(x.dt)}</div>
+      ${x.fix ? `<div class="fix">${esc(x.fix)}</div>` : ''}</div></div>`).join('')
+    : '<div class="fd"><div class="ic good">✓</div><div class="bd"><div class="ti">衝突なし</div><div class="dt">現在の入力では破綻する箇所は見つかりません（入力が少ないほど検出も少なくなります）。</div></div></div>';
+}
+
+/* ── 04 パーク内の回り順 ──
+   固定点（時間指定・昼寝・退園の締切）を置いて、隙間ごとに「歩く分を引くと何件入らないか」を出す。
+   待ち時間は推定しない。仮定値であることを画面に明示したうえで件数だけ数える。 */
+const RIDE_MARK = { all: '○', some: '△', switch: '◇' };
+
+function parkHours() {
+  if (!ST.parkHours) ST.parkHours = { open: null, close: null, waitMin: null };  // 旧 trip.json 対策
+  if (!ST.parkHours.byDay) ST.parkHours.byDay = {};   // 1.5デイ等で日ごとに開園・閉園が違う
+  return ST.parkHours;
+}
+function setDayHours(day, key, value) {
+  const ph = parkHours();
+  ph.byDay[day] = ph.byDay[day] || { open: null, close: null };
+  ph.byDay[day][key] = value || null;
+  save(); render();
+}
+
+/* 画面と書き出し画像で同じ文面を使う（short=画像用。横幅が固定なので長い行は畳む） */
+function courseLine(s, short) {
+  if (s.kind === 'move') {
+    const p = (short && s.path.length > 4)
+      ? `${s.path[0]}→…→${s.path[s.path.length - 1]}（${s.path.length}エリア）`
+      : s.path.join('→');
+    const head = `${s.at || '?'}–${s.until || '?'} ${p}（徒歩${s.walkMin}分）`;
+    return s.capacity == null ? head : `${head} 入るのは${s.capacity}件`;
+  }
+  if (s.kind === 'fixed') {
+    const names = s.items.map(i => i.name);
+    const body = (short && names.length > 1) ? `${names[0]} ほか${names.length - 1}件` : names.join('／');
+    return `${s.at}${s.until ? '–' + s.until : '〜'} 時間指定：${body}`;
+  }
+  if (s.kind === 'nap') return `${s.at}–${s.until} ${s.label}`;
+  return `${s.at || '未定'} ${s.b}`;
+}
+
+/* 行きたいアトラクション。候補を増やす指定ではなく「外せないもの」の宣言として扱う
+   （入らない・通らない・乗れないものが破綻として出る） */
+const WANT_STATE = {
+  fixed:       { s: '確保済み',   c: 'ok',    t: '時間指定の枠で押さえています' },
+  planned:     { s: '入ります',   c: 'ok',    t: '' },
+  tight:       { s: '要選択',     c: 'tight', t: '同じ区間の希望が入る件数を超えています' },
+  dropped:     { s: '回れません', c: 'ng',    t: '' },
+  unreachable: { s: '通りません', c: 'ng',    t: '今の回り順にこのエリアが入っていません' },
+  cantRide:    { s: '乗れません', c: 'ng',    t: '身長が届く人がいません' },
+};
+
+function wantC() { return ST.constraints.find(c => c.type === 'want') || null; }
+function setWant(rides) {
+  ST.constraints = ST.constraints.filter(c => c.type !== 'want');
+  if (rides.length) ST.constraints.push({ type: 'want', rides });
+  save(); render();
+}
+
+function renderWant(P) {
+  if (!P) { $('want').innerHTML = ''; return; }
+  const c = { wants: P.wants };
+  const on = (wantC() || {}).rides || [];
+  $('want').innerHTML = `<div class="avoid">
+    <div class="ah">行きたいアトラクション${on.length ? `（${on.length}件）` : ''}</div>
+    <div class="ar">${ATTR.map(a =>
+      `<button class="ax ${on.indexOf(a.id) >= 0 ? 'on' : ''}" data-ride="${a.id}" style="${on.indexOf(a.id) >= 0 ? 'background:var(--measure);border-color:var(--measure)' : ''}">${on.indexOf(a.id) >= 0 ? '★ ' : ''}${esc(a.short)}</button>`).join('')}</div>
+    ${c.wants.length ? `<div style="margin-top:8px">${c.wants.map(w => {
+      const st = WANT_STATE[w.state] || { s: w.state, c: '' };
+      const d = P.multi && w.nth ? `${w.nth}日目 ` : '';
+      const detail = w.state === 'fixed' ? `${d}${w.at}〜の枠`
+        : w.state === 'planned' || w.state === 'tight' ? `${d}${w.at}–${w.until} の区間（入るのは${w.capacity != null ? w.capacity + '件' : '未計算'}／希望${w.wantN}件）`
+        : w.state === 'dropped' ? esc(w.why)
+        : w.state === 'unreachable' ? (w.insert ? `${w.insert.step.at}–${w.insert.step.until} に寄せると +${w.insert.extra}分` : '寄れる区間がありません')
+        : st.t;
+      return `<div class="wst"><span class="s ${st.c}">${st.s}</span><span>${esc(w.short)}<span style="color:var(--muted)">｜${detail}</span></span></div>`;
+    }).join('')}</div>` : '<div class="note-sm">選ぶと「入るか／入らないか」を区間ごとに判定します。候補は増えません。</div>'}
+  </div>`;
+  $('want').querySelectorAll('.ax').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.ride;
+    setWant(on.indexOf(id) >= 0 ? on.filter(x => x !== id) : on.concat([id]));
+  }));
+}
+
+/* 通りたくないエリア（ゾンビ等）。避けるかどうかを決めるのは利用者なので、
+   ハザードは「候補」として出すだけで、勝手には避けない */
+function avoidC() {
+  return ST.constraints.find(c => c.type === 'avoid') || null;
+}
+function setAvoid(areas, from, to, label) {
+  ST.constraints = ST.constraints.filter(c => c.type !== 'avoid');
+  if (areas.length) ST.constraints.push({ type: 'avoid', areas, from: from || null, to: to || null, label: label || '通りたくないエリア' });
+  save(); render();
+}
+
+function renderAvoid(P) {
+  if (!P) { $('avoid').innerHTML = ''; return; }
+  /* ハザードは日ごとに違う（期間内の日だけ）。日付つきで並べる */
+  const seen = new Set();
+  const c = { hazards: P.days.flatMap(d => d.hazards.map(h => ({ ...h, day: d.day })))
+    .filter(h => !seen.has(h.id + h.day) && seen.add(h.id + h.day)) };
+  const av = avoidC();
+  const on = av ? av.areas : [];
+  $('avoid').innerHTML = `<div class="avoid">
+    <div class="ah">通りたくないエリア${av ? `（${esc(av.label)}）` : ''}</div>
+    <div class="ar">${S.areas().map(a =>
+      `<button class="ax ${on.indexOf(a) >= 0 ? 'on' : ''}" data-area="${esc(a)}">${on.indexOf(a) >= 0 ? '✕ ' : ''}${esc(a)}</button>`).join('')}</div>
+    ${on.length ? `<div class="at">避ける時間帯
+      <input type="time" id="av-from" value="${av.from || ''}">–<input type="time" id="av-to" value="${av.to || ''}">
+      <span>（空欄なら終日）</span><button class="ghost" id="av-clear">すべて解除</button></div>` : ''}
+    ${c.hazards.map(h => `<div class="hz">💡 ${esc(h.day || '')} は「${esc(h.label)}」の期間です（${esc(h.from || '')}〜${h.to ? esc(h.to) : 'パーククローズ'}）。${esc(h.note || '')}
+      ${h.areas.some(a => on.indexOf(a) < 0) ? `<button class="ghost" data-hz="${esc(h.id)}">${esc(h.areas.join('・'))}を避ける</button>` : ''}
+      ${h.verifiedAt ? '' : '<em>※出没エリアは未検証。当日の公式マップで必ず確認してください</em>'}</div>`).join('')}
+  </div>`;
+
+  $('avoid').querySelectorAll('.ax').forEach(b => b.addEventListener('click', () => {
+    const a = b.dataset.area;
+    const next = on.indexOf(a) >= 0 ? on.filter(x => x !== a) : on.concat([a]);
+    setAvoid(next, av && av.from, av && av.to, av && av.label);
+  }));
+  $('avoid').querySelectorAll('[data-hz]').forEach(b => b.addEventListener('click', () => {
+    const h = c.hazards.find(x => x.id === b.dataset.hz);
+    setAvoid([...new Set(on.concat(h.areas))], h.from, h.to, h.label);
+  }));
+  const clr = $('av-clear');
+  if (clr) clr.addEventListener('click', () => setAvoid([], null, null, null));
+  ['av-from', 'av-to'].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener('change', () =>
+      setAvoid(on, $('av-from').value, $('av-to').value, av.label));
+  });
+}
+
+const warnHtml = w =>
+  `<div class="fd"><div class="ic ${w.lv}">${w.lv === 'warn' ? '!' : w.lv === 'good' ? '✓' : 'i'}</div><div class="bd">
+    <div class="ti">${esc(w.ti)}</div><div class="dt">${esc(w.dt)}</div>
+    ${w.fix ? `<div class="fix">${esc(w.fix)}</div>` : ''}</div></div>`;
+
+function renderCourse() {
+  const P = LAYOUT ? S.plan() : null;
+  renderWant(P);
+  renderAvoid(P);
+  const ph = parkHours();
+  $('c-wait').value = ph.waitMin ?? (LAYOUT ? LAYOUT.assumeWaitMin : 45);
+
+  if (!P) {
+    $('c-days').textContent = '';
+    $('c-day').textContent = '';
+    $('course').innerHTML = '<div class="empty">このパークの地理データ（park-layout）がありません。</div>';
+    return;
+  }
+  $('c-day').textContent = `待ち${P.days[0].assumeWait}分と仮定${P.days[0].approx ? '・徒歩分は概算' : ''}`;
+  $('c-days').textContent = P.multi
+    ? `${P.days.length}日ぶん（${P.days.map(d => d.day).join(' / ')}）。前の日に回るぶんは翌日の候補から外しています`
+    : '';
+
+  $('course').innerHTML = P.warns.map(warnHtml).join('')
+    + P.days.map(c => dayHtml(c, P)).join('');
+
+  $('course').querySelectorAll('.dayhd input[type=time]').forEach(el =>
+    el.addEventListener('change', e => setDayHours(el.dataset.day, el.dataset.k, e.target.value)));
+}
+
+function dayHtml(c, P) {
+  const info = (c.info || [])[0];
+  const head = `<div class="dayhd">
+      ${P.multi ? `<span class="n">${c.nth}日目</span>` : ''}<span class="d">${esc(c.day || '日付未定')}</span>
+      ${info && info.of > 1 ? `<span class="d">${esc(info.ticket)}（${info.nth}/${info.of}日目）</span>` : ''}
+      <span class="t">開園<input type="time" data-day="${c.day}" data-k="open" value="${c.open || ''}">
+        閉園<input type="time" data-day="${c.day}" data-k="close" value="${c.close || ''}"></span>
+    </div>`;
+
+  const steps = c.steps.map(s => {
+    if (s.kind === 'move') {
+      if (!s.items.length && !s.walkMin) return '';
+      const budget = s.spanMin == null
+        ? '<span class="budget">開園・閉園が未入力の区間。順序だけ出しています</span>'
+        : `<span class="budget ${s.short || s.over ? 'tight' : ''}">${s.spanMin}分 − 徒歩${s.walkMin}分 = 実質${s.restMin}分 → 待ち${c.assumeWait}分なら <b>${s.capacity}件</b>（候補${s.items.length}件）</span>`;
+      const chips = s.items.map(i =>
+        `<span class="ci ${i.cls} ${i.want ? 'want' : ''}"><span class="m">${i.want ? '★' : RIDE_MARK[i.cls]}</span> ${esc(i.short)}${
+          i.indoor ? '<span title="屋内">🏠</span>' : ''}${i.soaks ? '<span title="水を浴びる">💧</span>' : ''}${
+          i.cls === 'switch' ? '（大人交代）' : i.cls === 'some' && i.ng.length ? `（${i.ng.map(esc).join('・')}×）` : ''}</span>`).join('');
+      return `<div class="cstep"><div class="t mono">${s.at || '--:--'}–${s.until || '--:--'}</div>
+        <div class="b"><span class="path">${esc(s.path.join(' → '))}</span>
+        <em>徒歩${s.walkMin}分${s.isLast ? '（出口へ戻る分を含む）' : ''}</em>
+        <div>${budget}</div><div>${chips}</div>
+        ${s.dropped.length ? `<em>除外：${s.dropped.map(d => esc(d.short) + '（' + d.why + '）').join('、')}</em>` : ''}
+        </div></div>`;
+    }
+    if (s.kind === 'fixed') {
+      return `<div class="cstep fix"><div class="t mono">${s.at}–${s.until || '?'}</div>
+        <div class="b">${s.items.map(i => esc(i.name)).join('／')}
+        <em>時間指定（動かせない）${s.area ? '｜' + esc(s.area) : ''}${s.reentry === false ? '｜再入場不可' : ''}${s.openEnd ? '｜終了時刻が未登録' : ''}</em></div></div>`;
+    }
+    if (s.kind === 'nap') {
+      const where = s.preEntry ? '入園前（この日はここから）'
+        : s.where === 'inpark' ? 'パーク内で休む' : s.where === 'out' ? '一度パークを出る' : '場所は未定';
+      return `<div class="cstep nap"><div class="t mono">${s.at}–${s.until}</div>
+        <div class="b">${esc(s.label || '休憩')}<em>動かせない固定点として区間を割っています｜${where}${
+          c.reentry === false && !s.preEntry && s.where !== 'inpark' ? '（この券では出ると戻れません）' : ''}</em></div></div>`;
+    }
+    return `<div class="cstep"><div class="t mono">${s.at || '--:--'}</div>
+      <div class="b">${esc(s.b)}<em>${esc(s.e)}</em></div></div>`;
+  }).join('');
+
+  return head + c.warns.map(warnHtml).join('') + steps
+    + (c.nth === c.of ? '<div class="note-sm">徒歩分は地図からの概算（実測ではありません）。待ち時間は当日の状況次第なので推定しません — 上の「待ち」は件数を数えるための仮定値です。</div>' : '');
+}
+
+function renderDerived() {
+  const steps = S.derive();
+  $('derived').innerHTML = steps.length ? steps.map(s =>
+    `<div class="step"><div class="t mono">${s.t}</div><div class="b">${esc(s.b)}<em>${esc(s.e)}</em></div></div>`).join('')
+    : '<div class="empty">帰りの便を貼るか、出発時刻を入力すると逆算します。</div>';
+}
+
+function todayIso() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function renderBooking() {
+  const today = todayIso();
+  const ov = S.overlaps(today);
+  $('overlaps').innerHTML = ov.length ? ov.map(o =>
+    `<div class="ovl">⚠ <b class="mono">${o.day}</b> は締切が重なります：${o.items.map(esc).join(' / ')}。同じ日に二つ張り付く前提で段取りを。</div>`).join('') : '';
+
+  $('booking').innerHTML = S.bookings(today).map(b => {
+    const cls = b.state === '受付中' ? 'ic watch'
+      : b.state === '未' ? (b.days !== null && b.days <= 30 ? 'ic warn' : 'ic note')
+      : b.state === '済' ? 'ic good'
+      : b.state === '監視中' ? 'ic watch'
+      : b.state === '予約不可' ? 'ic warn' : 'ic none';
+    const mark = b.state === '受付中' ? '▶' : b.state === '未' ? '!' : b.state === '済' ? '✓'
+      : b.state === '監視中' ? '👁' : b.state === '予約不可' ? '!' : '–';
+    /* ★解禁日を過ぎたものは「期限切れ」ではない。いま予約できる＝窓が開いている */
+    const closeAt = b.endIso ? `${b.endIso}${b.endAt ? ' ' + b.endAt : ''}` : null;
+    const when = b.state === '受付中'
+        ? `もう予約できます${b.iso ? `（${b.iso} ${b.at || ''} 解禁済み）` : ''}${closeAt ? `／${closeAt} で締切` : ''}`
+      : b.state === '締切' ? `${closeAt} で締切済み`
+      : b.mode === 'asap' ? '今すぐ（締切なし・待つほど損）'
+      : b.mode === 'none' ? '予約制度なし → 単一障害点の確認へ'
+      : b.mode === 'unknown' ? '解禁日は非公表 → 監視（②）で通知'
+      : b.iso ? `${b.iso} ${b.at || ''}` : `基準日が未定（${b.offsetMonths ? `${-b.offsetMonths}ヶ月前` : `${-b.offsetDays}日前`}${b.at ? ' ' + b.at : ''}）`;
+    const cd = (b.state === '未' && b.days !== null) ? `<span class="cdn mono">あと${b.days}日</span>`
+      : (b.state === '受付中' && b.endDays !== null) ? `<span class="cdn mono">締切まであと${b.endDays}日</span>` : '';
+    const chk = (b.mode !== 'none') ? `<label style="font-size:11px;float:right"><input type="checkbox" class="bk-done" data-rule="${b.key}" ${b.done ? 'checked' : ''}> 済</label>` : '';
+    const cx = !b.cancel ? '' :
+      (b.cancel.refundable === false ? '<span class="bdg ng">取消不可</span>'
+        : b.cancel.refundable === true ? '<span class="bdg fix">取消可</span>'
+        : b.cancel.refundable === 'partial' ? '<span class="bdg tmp">取消は条件付き</span>'
+        : '<span class="bdg tbd">取消規定 要確認</span>')
+      + ` <span style="font-size:11px;color:var(--muted)">${esc(b.cancel.note || '')}</span>`;
+    return `<div class="fd"><div class="${cls}">${mark}</div><div class="bd">
+      <div class="ti">${esc(b.label)}${cd}${chk}</div>
+      <div class="dt"><span class="mono">${esc(when)}</span>｜${esc(b.note)}</div>
+      ${cx ? `<div class="dt">${cx}</div>` : ''}</div></div>`;
+  }).join('');
+  $('booking').querySelectorAll('.bk-done').forEach(el => el.addEventListener('change', e => {
+    ST.booked[el.dataset.rule] = e.target.checked;
+    if (!e.target.checked) delete ST.booked[el.dataset.rule];
+    save(); render();
+  }));
+}
+
+function renderUndecided() {
+  const u = S.undecided();
+  ST.tickets.forEach(t => (t.fixed || []).forEach(s => {
+    if (s.reentry === false && !s.until) u.push({ what: `${s.name}の再入場不可枠の終了時刻`, why: '昼寝との衝突を検査できない' });
+  }));
+  $('undecided').innerHTML = u.length ? u.map(x =>
+    `<div class="fd"><div class="ic none">?</div><div class="bd"><div class="ti">${esc(x.what)}</div><div class="dt">${esc(x.why)}</div></div></div>`).join('')
+    : '<div class="fd"><div class="ic good">✓</div><div class="bd"><div class="ti">未定はありません</div></div></div>';
+}
+
+/* ── プレゼン画像（canvas 手描き。外部ライブラリ不可＝オフライン要件） ── */
+function exportImage() {
+  const showPrice = $('show-price').checked;   // 金額は既定で非表示
+  const W = 900, pad = 40;
+  const cv = $('share-canvas');
+  const ctx = cv.getContext('2d');
+  const lines = [];
+  const kids = ST.people.filter(p => !p.adult && p.h != null);
+  lines.push({ t: '段取りたび｜旅程チェック', s: 34, b: true, c: '#12202E' });
+  lines.push({ t: (ST.trip.start || '日程未定') + (ST.trip.end ? ' 〜 ' + ST.trip.end : ''), s: 20, c: '#5A6B7A' });
+  lines.push({ t: '', s: 10 });
+  kids.forEach(k => {
+    const c = S.verdictCounts(k);
+    lines.push({ t: `${k.name}（${k.h}cm）  ○${c.ok}  △${c.edge}  ×${c.ng}`, s: 22, b: true, c: '#12202E' });
+    ATTR.filter(a => S.judge(k, a).s === 'edge').forEach(a => {
+      lines.push({ t: `  △ ${a.short} あと${S.judge(k, a).gap}cm（当日は靴込みで計測）`, s: 18, c: '#D98200' });
+    });
+  });
+  lines.push({ t: '', s: 10 });
+  const F = S.solve(todayIso()).filter(f => f.lv === 'warn' || f.kind === 'adjacent' || f.kind === 'openNow');
+  if (F.length) lines.push({ t: '注意すること', s: 22, b: true, c: '#C0453B' });
+  F.slice(0, 4).forEach(f => {
+    lines.push({ t: '・' + f.ti, s: 18, c: '#12202E' });
+    if (f.fix) wrap('　→ ' + f.fix, 46).forEach(w => lines.push({ t: w, s: 16, c: '#5A6B7A' }));
+  });
+  /* 回り順（家族に見せる形）。1.5デイ等は日ごとに分けて出す */
+  const P = LAYOUT ? S.plan() : null;
+  if (P && P.days.some(c => c.steps.some(s => s.kind !== 'open' && s.kind !== 'exit'))) {
+    lines.push({ t: '', s: 10 });
+    lines.push({ t: 'パーク内の回り順', s: 22, b: true, c: '#12202E' });
+    (P.days[0].avoids || []).forEach(a => wrap(`　${a.label}を避ける前提：${a.areas.join('・')}${a.from ? `（${a.from}〜${a.to || '閉園'}）` : ''}`, 40)
+      .forEach(w => lines.push({ t: w, s: 15, c: '#C0453B' })));
+    if (P.wants.length) {
+      const okw = P.wants.filter(w => w.state === 'planned' || w.state === 'fixed');
+      wrap(`　行きたい ${P.wants.length}件のうち入るのは ${okw.length}件：${okw.map(w => w.short).join('・') || 'なし'}`, 40)
+        .forEach(w => lines.push({ t: w, s: 15, c: '#5A6B7A' }));
+      P.wants.filter(w => w.state !== 'planned' && w.state !== 'fixed').forEach(w =>
+        wrap(`　× ${w.short}：${(WANT_STATE[w.state] || {}).s || w.state}`, 40)
+          .forEach(x => lines.push({ t: x, s: 15, c: '#C0453B' })));
+    }
+    P.days.forEach(C => {
+      lines.push({ t: `${P.multi ? C.nth + '日目 ' : ''}${C.day || '日付未定'}（${C.open || '?'}〜${C.close || '?'}）`, s: 18, b: true, c: '#12202E' });
+      C.steps.slice(0, 7).forEach(s => wrap('・' + courseLine(s, true), 42)
+        .forEach(w => lines.push({ t: w, s: 16, c: s.kind === 'fixed' ? '#12202E' : '#5A6B7A' })));
+      C.warns.filter(w => w.lv === 'warn').slice(0, 2).forEach(w =>
+        lines.push({ t: '・' + w.ti, s: 16, c: '#C0453B' }));
+    });
+    lines.push({ t: `　※件数は待ち${P.days[0].assumeWait}分と置いた場合の目安。徒歩分は概算です`, s: 14, c: '#5A6B7A' });
+  }
+  lines.push({ t: '', s: 10 });
+  const bks = S.bookings(todayIso()).filter(b => b.state === '受付中' || b.state === '未' || b.state === '監視中');
+  if (bks.length) lines.push({ t: 'これからの予約', s: 22, b: true, c: '#2E5FD9' });
+  bks.slice(0, 5).forEach(b => {
+    if (b.state === '受付中') {
+      lines.push({ t: `・${b.label}  もう予約できます${b.endIso ? `（${b.endIso} ${b.endAt || ''} 締切・あと${b.endDays}日）` : ''}`, s: 18, c: '#2E5FD9' });
+      return;
+    }
+    const when = b.iso ? `${b.iso} ${b.at || ''}` : (b.mode === 'unknown' ? '解禁日を監視中' : '日付未定');
+    lines.push({ t: `・${b.label}  ${when}${b.days != null && b.days >= 0 ? `（あと${b.days}日）` : ''}`, s: 18, c: '#12202E' });
+  });
+  if (showPrice) {
+    const prices = [];
+    if (ST.hotel && ST.hotel.price) prices.push(`宿 ¥${ST.hotel.price.toLocaleString()}`);
+    ST.tickets.forEach(t => { if (t.price) prices.push(`${t.name} ¥${t.price.toLocaleString()}`); });
+    if (ST.flight && ST.flight.price) prices.push(`航空券 ¥${ST.flight.price.toLocaleString()}`);
+    if (prices.length) { lines.push({ t: '', s: 10 }); lines.push({ t: '金額：' + prices.join(' / '), s: 16, c: '#5A6B7A' }); }
+  }
+  const u = S.undecided();
+  if (u.length) { lines.push({ t: '', s: 10 }); lines.push({ t: `まだ決まっていないこと：${u.length}件（${u.slice(0, 3).map(x => x.what).join('・')}${u.length > 3 ? ' ほか' : ''}）`, s: 15, c: '#5A6B7A' }); }
+
+  function wrap(text, n) {
+    const out = [];
+    for (let i = 0; i < text.length; i += n) out.push(i ? '　　' + text.slice(i, i + n) : text.slice(i, i + n));
+    return out;
+  }
+
+  const H = lines.reduce((h, l) => h + l.s * 1.55, pad * 2) + 30;
+  cv.width = W; cv.height = Math.ceil(H);
+  ctx.fillStyle = '#E9EEF1'; ctx.fillRect(0, 0, W, cv.height);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(pad / 2, pad / 2, W - pad, cv.height - pad);
+  ctx.strokeStyle = '#D5DEE4'; ctx.strokeRect(pad / 2, pad / 2, W - pad, cv.height - pad);
+  let y = pad + 14;
+  const FONT = '"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif';
+  lines.forEach(l => {
+    if (l.t) {
+      ctx.fillStyle = l.c || '#12202E';
+      ctx.font = `${l.b ? '700' : '400'} ${l.s}px ${FONT}`;
+      ctx.fillText(l.t, pad, y + l.s);
+    }
+    y += l.s * 1.55;
+  });
+  ctx.fillStyle = '#5A6B7A'; ctx.font = `12px ${FONT}`;
+  ctx.fillText('段取りたび v0.2 — 判定材料であり保証ではありません', pad, cv.height - pad / 2 - 10);
+
+  const a = document.createElement('a');
+  a.href = cv.toDataURL('image/png');
+  a.download = 'dandori-trip.png';
+  a.click();
+}
+
+/* ── メイン描画 ── */
+function render() {
+  renderTabs();
+  S.configure({ attractions: ATTR, rules: RULES, layout: LAYOUT, state: ST, exposure: DATA.exposure });
+  renderPeople();
+  renderDates();
+  renderParsedCards();
+  renderRulerVerdict();
+  renderFindings();
+  renderCourse();
+  renderDerived();
+  renderBooking();
+  renderUndecided();
+}
+
+/* ── イベント ── */
+$('np-add').addEventListener('click', () => {
+  const name = $('np-name').value.trim();
+  if (!name) return;
+  ST.people.push({
+    id: 'p' + (ST.people.length + 1) + '-' + Math.random().toString(36).slice(2, 6),
+    name,
+    age: $('np-age').value === '' ? null : +$('np-age').value,
+    h: $('np-h').value === '' ? null : +$('np-h').value,
+    adult: $('np-adult').checked,
+    source: 'manual', status: '確定',
+  });
+  $('np-name').value = ''; $('np-age').value = ''; $('np-h').value = ''; $('np-adult').checked = false;
+  save(); render();
+});
+[['d-start', 'start'], ['d-end', 'end']].forEach(([id, k]) => {
+  $(id).addEventListener('change', e => { ST.trip[k] = e.target.value || null; save(); render(); });
+});
+$('d-name').addEventListener('change', e => { ST.name = e.target.value.trim() || ST.name; save(); render(); });
+$('d-budget').addEventListener('change', e => { ST.budget = e.target.value === '' ? null : +e.target.value; save(); render(); });
+[['t-out', 'outbound'], ['t-ret', 'return']].forEach(([prefix, leg]) => {
+  const upd = () => { setTransport(leg, $(prefix + '-mode').value, $(prefix + '-date').value); save(); render(); };
+  $(prefix + '-mode').addEventListener('change', upd);
+  $(prefix + '-date').addEventListener('change', upd);
+});
+/* 回り順：開園・閉園・待ちの仮定は旅行ごとに保存する。日の選択は保存しない（見るだけ） */
+$('c-wait').addEventListener('change', e => {
+  parkHours().waitMin = e.target.value === '' ? null : +e.target.value;
+  save(); render();
+});
+$('btn-parse').addEventListener('click', () => {
+  const raw = $('paste').value.trim();
+  if (!raw) return;
+  /* 空行2つ以上で区切って複数貼りにも対応。ただし1ブロックで判別できればそのまま */
+  const one = P.parseAny(raw);
+  const items = one.type ? [one]
+    : raw.split(/\n{3,}/).map(b => P.parseAny(b)).filter(p => p.type);
+  if (!items.length) { $('parse-msg').textContent = '読み取れませんでした。控えの文面をそのまま貼ってください。'; return; }
+  items.forEach(applyParsed);
+  $('parse-msg').textContent = `${items.map(i => ({ flight: '便', train: '新幹線', parkTickets: 'チケット', hotel: '宿' }[i.type])).join('・')}を読み取りました（仮）。内容を確認して確定にしてください。`;
+  $('paste').value = '';
+  save(); render();
+});
+$('btn-export').addEventListener('click', exportTrip);
+$('btn-import').addEventListener('click', () => $('file-import').click());
+$('file-import').addEventListener('change', e => { if (e.target.files[0]) importTrip(e.target.files[0]); e.target.value = ''; });
+$('btn-sample').addEventListener('click', loadSample);
+$('btn-clear').addEventListener('click', () => {
+  if (!confirm('この旅行の入力内容を消して新規にしますか？（他のタブの旅行は残ります）')) return;
+  const t = { id: ST.id, ...S.emptyTrip(), name: ST.name };
+  FILE.trips[FILE.trips.indexOf(ST)] = t;
+  ST = t; save(); render();
+});
+$('btn-image').addEventListener('click', exportImage);
+
+load();
+render();
+})();
+</script>
+</body>
+</html>

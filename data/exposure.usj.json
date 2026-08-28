@@ -1,0 +1,20 @@
+{
+  "_verified": false,
+  "_note": "エリアの屋外率は未設定。推測で埋めない（CLAUDE.md §8）。実旅行で観測してから入れる。null のままでも定性の指摘は出る。",
+  "areas": {
+    "マリオ": null,
+    "ハリポタ": null,
+    "ジュラシック": null,
+    "ミニオン": null,
+    "アミティ": null,
+    "ハリウッド": null
+  },
+  "legModes": {
+    "walk_open": 1.0,
+    "wait_open": 1.0,
+    "walk_covered": 0.15,
+    "wait_covered": 0.2,
+    "train": 0.0,
+    "indoor": 0.0
+  }
+}
