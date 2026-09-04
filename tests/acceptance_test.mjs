@@ -505,6 +505,21 @@ ok('窓が閉じたら「締切」（事前申込は発売開始日7:30まで）
   assert.equal(ret.find(x => x.id === 'smartex1y').state, '受付中', '帰り(11/17)の窓はまだ開いている');
 });
 
+ok('きっぷの受取は行き・帰りで別々に窓が開く（帰りのほうが後）', () => {
+  /* ★予約が取れていても受け取っていなければ乗れない＝予約とは別の singlePoint。
+     しかも受取の窓は「その券の乗車日」基準なので、行きを受け取れる日に帰りはまだ受け取れない。
+     まとめて1回で済むと思って駅へ行くと、二度手間になる（行き11/15・帰り11/17の旅程） */
+  const b = S.bookings('2026-10-16');
+  const out = b.find(x => x.id === 'ticketpickup' && x.key.endsWith('@outbound'));
+  const ret = b.find(x => x.id === 'ticketpickup' && x.key.endsWith('@return'));
+  assert.equal(out.iso, '2026-10-15', '行きは乗車1ヶ月前から');
+  assert.equal(ret.iso, '2026-10-17', '帰りは2日ぶん遅れて開く');
+  assert.equal(out.state, '受付中');
+  assert.equal(ret.state, '未', '同じ日に両方は受け取れない');
+  assert.equal(out.endIso, '2026-11-15', '窓は乗車日当日に閉じる');
+  assert.ok(out.caution.includes('3日前'), '券売機しか選べない人向けの実質解禁日を添える');
+});
+
 ok('もう予約できるのに押さえていなければ Finding に出す', () => {
   const f = S.solve('2026-08-11').filter(x => x.kind === 'openNow');
   assert.equal(f.length, 1, '同じルールの往復は1件にまとめる');

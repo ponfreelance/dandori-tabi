@@ -1,6 +1,6 @@
 {
- "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）。schemaVersion 4: offset* は『窓の開き』であって締切ではない。閉じる側を end{offsetMonths,offsetDays,at} で持つ（省略時は anchor 当日＝乗車日・搭乗日・来園日に閉じる）。解禁済み・未確保は『期限切れ』ではなく『受付中』。pro: watch（実監視の宿・日付）と watchOnly ルールを持つ。①の配布物へは scripts/build.py が除外して埋め込む",
- "schemaVersion": 4,
+ "_comment": "mode: exact/window/asap/none/unknown  criticality: replaceable/singlePoint。schemaVersion 2: anchor を trainDate/flightDate 決め打ちから train/flight（transports の該当手段すべてに適用。往復新幹線なら行き・帰り2件）に一般化。appliesWhen で交通手段に条件づけ。schemaVersion 3: watch を sources 配列に（公式サイト＋楽天のマルチソース監視。公式が先に開くことが多く、楽天単独では解禁を取り逃す）。schemaVersion 4: offset* は『窓の開き』であって締切ではない。閉じる側を end{offsetMonths,offsetDays,at} で持つ（省略時は anchor 当日＝乗車日・搭乗日・来園日に閉じる）。解禁済み・未確保は『期限切れ』ではなく『受付中』。pro: watch（実監視の宿・日付）と watchOnly ルールを持つ。①の配布物へは scripts/build.py が除外して埋め込む。schemaVersion 5: きっぷの受取（ticketpickup）を追加。予約が取れていても受け取っていなければ乗れない＝予約とは別の singlePoint。anchor:train なので行き・帰りそれぞれの乗車日で窓が開く（帰りのほうが後に開くのを取り逃さないため）",
+ "schemaVersion": 5,
  "rules": [
   {
    "id": "jal",
@@ -98,6 +98,29 @@
    }
   },
   {
+   "id": "ticketpickup",
+   "label": "きっぷの受取（スマートEX／EX予約）",
+   "anchor": "train",
+   "offsetMonths": -1,
+   "offsetDays": 0,
+   "at": null,
+   "end": {
+    "offsetMonths": 0,
+    "offsetDays": 0,
+    "at": null
+   },
+   "mode": "window",
+   "criticality": "singlePoint",
+   "note": "予約人数全員ぶんのICカード指定が無ければチケットレス乗車はできず、乗車前に全員ぶんのきっぷ受取が必要。子どもは小児用ICカードが要る（未就学児は持てないことがある）ので、家族連れは受取必須になりやすい",
+   "caution": "受け取れる期間が場所で違う。係員のきっぷうりばは乗車日1ヶ月前から（JR東海・西日本・九州の主な駅）。指定席券売機・受取専用機は乗車日3日前から。★JR東日本の駅（東京都区内・横浜市内・川崎・小田原・熱海）は指定席券売機のみで駅窓口では受け取れない＝首都圏在住でJR東海の駅まで出ないなら、実質の解禁は乗車日3日前。★行きと帰りで乗車日が違えば解禁日も違う（帰りのほうが後）",
+   "verifiedAt": "2026-09-04",
+   "source": "https://smart-ex.jp/entraining/ticket/place/",
+   "cancel": {
+    "refundable": true,
+    "note": "受け取ると以後の変更・払戻はアプリではできず駅の窓口のみになる。早く受け取るほど当日の単一障害点は消えるが、予定変更の余地を失う"
+   }
+  },
+  {
    "id": "hotel",
    "label": "ホテル",
    "anchor": "start",
@@ -184,5 +207,8 @@
     "decisionRule": "帰りの便から逆算し、代替経路でも間に合う最終時刻を判断点とする"
    }
   }
+ ],
+ "_todo": [
+  "TODO(schema): ticketpickup は窓が2つある（窓口=1ヶ月前 / 指定席券売機=3日前）が、schema は開き1つ・閉じ1つしか持てない。いまは早いほう（窓口1ヶ月前）を窓として持ち、券売機の3日前は caution の文言でしか伝えていない＝『券売機で受け取れる日』が日付として計算されない。首都圏在住のように券売機しか選べない人には、実質の解禁日が画面に出ないことになる。窓を複数持てるように広げるか、appliesWhen を場所条件へ拡張するかは未決"
  ]
 }

@@ -199,7 +199,7 @@
   function detect(raw) {
     const t = norm(raw);
     if (/便|搭乗/.test(t) && /[A-Z]{2,3}\d{1,4}/.test(t)) return 'flight';
-    /* 「のぞみ42号」だけでなく、スマートEXアプリの「のぞみ 339」（号なし）も拾う */
+    /* 「のぞみ42号」だけでなく、スマートEXアプリの「のぞみ 271」（号なし）も拾う */
     if (new RegExp(`(?:${TRAIN_NAMES})\\s*\\d{1,4}`).test(t) ||
         (/新幹線|スマート\s*EX|EX\s*予約|号車/.test(t) && /発|着|指定席|→/.test(t))) return 'train';
     if (t.includes('パス') || t.includes('アトラクション') || /チケット番号/.test(t)) return 'parkTickets';
